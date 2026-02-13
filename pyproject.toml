@@ -9,3 +9,18 @@ dependencies = [
   "requests>=2.32.0",
   "web3>=7.15.0",
 ]
+
+[dependency-groups]
+dev = ["pre-commit>=4.5.0", "ruff>=0.15.0"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+fixable = ["ALL"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
