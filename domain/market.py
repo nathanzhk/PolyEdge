@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
-from adapters.market_client import get_market_by_slug
+from adapters.market_api import get_market_by_slug
 from common import time
 
 
