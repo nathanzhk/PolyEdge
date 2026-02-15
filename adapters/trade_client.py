@@ -39,10 +39,10 @@ class TradeClient:
         )
         self.client.set_api_creds(self.client.create_or_derive_api_creds())
 
-    def buy(self, token: Token, shares: float, price: float) -> tuple[bool, str | None]:
+    def buy(self, token: Token, shares: float, price: float) -> str | None:
         return self._submit_order(token=token, shares=shares, price=price, side=BUY)
 
-    def sell(self, token: Token, shares: float, price: float) -> tuple[bool, str | None]:
+    def sell(self, token: Token, shares: float, price: float) -> str | None:
         return self._submit_order(token=token, shares=shares, price=price, side=SELL)
 
     def warm_up(self, token: Token) -> bool:
@@ -131,9 +131,7 @@ class TradeClient:
             return 0.0
         return round(int(balance) / 1_000_000, 6)
 
-    def _submit_order(
-        self, *, token: Token, shares: float, price: float, side: str
-    ) -> tuple[bool, str | None]:
+    def _submit_order(self, *, token: Token, shares: float, price: float, side: str) -> str | None:
         self.logger.info("%s %s %.6f at $%.2f", side.lower(), token.outcome.lower(), shares, price)
         try:
             create_start_ns = time.perf_counter_ns()
@@ -153,20 +151,24 @@ class TradeClient:
 
             if not isinstance(resp, dict):
                 self.logger.error("invalid response: %r", resp)
-                return False, None
+                return None
 
             if resp.get("success") is not True:
                 self.logger.error("%s", resp.get("errorMsg") or "unknown error")
-                return False, None
+                return None
 
             order_id = resp.get("orderID")
+            if not isinstance(order_id, str) or not order_id:
+                self.logger.error("missing order id: %r", resp)
+                return None
+
             self.logger.info("order %s", order_id)
-            return True, order_id
+            return order_id
 
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
             self.logger.error("%s", self._error_message(e))
-            return False, None
+            return None
 
     @staticmethod
     def _error_message(error: PolyApiException) -> str:
