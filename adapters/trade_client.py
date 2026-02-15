@@ -39,22 +39,6 @@ class TradeClient:
         )
         self.client.set_api_creds(self.client.create_or_derive_api_creds())
 
-    def fee_rate(self, market: Market) -> float:
-        if self.role == "maker":
-            return 0.0
-        if self.role == "taker":
-            return market.fee_rate
-        raise ValueError(f"invalid role: {self.role}")
-
-    def calc_fee(self, market: Market, shares: float, price: float) -> float:
-        return round(self.fee_rate(market) * shares * price * (1 - price), 6)
-
-    def calc_bought_shares(self, market: Market, shares: float, price: float) -> float:
-        return round(shares * (1 - self.fee_rate(market) * (1 - price)), 6)
-
-    def calc_sold_amount(self, market: Market, shares: float, price: float) -> float:
-        return round(shares * price * (1 - self.fee_rate(market) * (1 - price)), 6)
-
     def buy(self, token: Token, shares: float, price: float) -> tuple[bool, str | None]:
         return self._submit_order(token=token, shares=shares, price=price, side=BUY)
 
@@ -73,6 +57,22 @@ class TradeClient:
         self.logger.debug("warm up success")
         return True
 
+    def fee_rate(self, market: Market) -> float:
+        if self.role == "maker":
+            return 0.0
+        if self.role == "taker":
+            return market.fee_rate
+        raise ValueError(f"invalid role: {self.role}")
+
+    def calc_fee(self, market: Market, shares: float, price: float) -> float:
+        return round(self.fee_rate(market) * shares * price * (1 - price), 6)
+
+    def calc_net_buy_shares(self, market: Market, shares: float, price: float) -> float:
+        return round(shares * (1 - self.fee_rate(market) * (1 - price)), 6)
+
+    def calc_net_sell_value(self, market: Market, shares: float, price: float) -> float:
+        return round(shares * price * (1 - self.fee_rate(market) * (1 - price)), 6)
+
     def get_cash_balance(self) -> float:
         params = BalanceAllowanceParams(
             asset_type=AssetType.COLLATERAL,  # type: ignore
@@ -81,7 +81,7 @@ class TradeClient:
         self.logger.debug("cash balance: %.6f", balance)
         return balance
 
-    def get_token_balance(self, token: Token) -> float:
+    def get_token_shares(self, token: Token) -> float:
         params = BalanceAllowanceParams(
             token_id=token.id,
             asset_type=AssetType.CONDITIONAL,  # type: ignore
@@ -122,6 +122,15 @@ class TradeClient:
         self.logger.error("cancel failed: %s", failed_reason)
         return False
 
+    def _get_balance(self, params: BalanceAllowanceParams) -> float:
+        resp = self.client.get_balance_allowance(params)
+        if not isinstance(resp, dict):
+            return 0.0
+        balance = resp.get("balance", "0")
+        if not isinstance(balance, str | int):
+            return 0.0
+        return round(int(balance) / 1_000_000, 6)
+
     def _submit_order(
         self, *, token: Token, shares: float, price: float, side: str
     ) -> tuple[bool, str | None]:
@@ -158,15 +167,6 @@ class TradeClient:
             self.logger.debug("%r", e.error_msg)
             self.logger.error("%s", self._error_message(e))
             return False, None
-
-    def _get_balance(self, params: BalanceAllowanceParams) -> float:
-        resp = self.client.get_balance_allowance(params)
-        if not isinstance(resp, dict):
-            return 0.0
-        balance = resp.get("balance", "0")
-        if not isinstance(balance, str | int):
-            return 0.0
-        return round(int(balance) / 1_000_000, 6)
 
     @staticmethod
     def _error_message(error: PolyApiException) -> str:
