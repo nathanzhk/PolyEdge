@@ -4,6 +4,7 @@
 .http
 logs/
 *.log
+*.json
 
 __pycache__/
 *.py[cod]
