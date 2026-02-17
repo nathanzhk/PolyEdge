@@ -90,7 +90,7 @@ class TradeClient:
             asset_type=AssetType.CONDITIONAL,  # type: ignore
         )
         shares = self._get_balance(params)
-        self.logger.debug("token (%s) balance: %.6f", token.key, shares)
+        self.logger.debug("token shares: %.6f", shares)
         return shares
 
     def get_order_by_id(self, order_id: str) -> Order | None:
@@ -137,7 +137,7 @@ class TradeClient:
                 self.logger.error("invalid response: %s", e)
         return orders
 
-    def cancel_order(self, order_id: str) -> bool:
+    def cancel_order_by_id(self, order_id: str) -> bool:
         try:
             resp = self.client.cancel(order_id)
             self.logger.debug("%r", resp)
@@ -156,7 +156,7 @@ class TradeClient:
             if isinstance(failed_dict, dict)
             else "unknown reason"
         )
-        self.logger.error("cancel failed: %s", failed_reason)
+        self.logger.error("cancel order failed: %s", failed_reason)
         return False
 
     def _get_balance(self, params: BalanceAllowanceParams) -> float:

@@ -13,24 +13,14 @@ def now_ts_ms() -> int:
 
 
 def current_5m_window_s() -> tuple[int, int]:
-    return current_window_s(WINDOW_5M_S)
-
-
-def current_5m_window_ms() -> tuple[int, int]:
-    start_ts_s, end_ts_s = current_5m_window_s()
-    return start_ts_s * 1000, end_ts_s * 1000
+    return _current_window_s(WINDOW_5M_S)
 
 
 def current_15m_window_s() -> tuple[int, int]:
-    return current_window_s(WINDOW_15M_S)
+    return _current_window_s(WINDOW_15M_S)
 
 
-def current_15m_window_ms() -> tuple[int, int]:
-    start_ts_s, end_ts_s = current_15m_window_s()
-    return start_ts_s * 1000, end_ts_s * 1000
-
-
-def current_window_s(window_s: int) -> tuple[int, int]:
+def _current_window_s(window_s: int) -> tuple[int, int]:
     current_ts_s = now_ts_s()
     start_ts_s = current_ts_s - (current_ts_s % window_s)
     end_ts_s = start_ts_s + window_s
