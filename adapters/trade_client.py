@@ -1,5 +1,6 @@
 import os
 import time
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from py_clob_client.client import ClobClient
@@ -14,6 +15,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 
 from common.logger import get_logger
 from domain.market import Market, Token
+from domain.order import Order
+from schemas.http_responses import OrderMetadata
 
 TradeRole = Literal["maker", "taker"]
 
@@ -52,9 +55,9 @@ class TradeClient:
             self.client.get_tick_size(token.id)
             self.client.get_fee_rate_bps(token.id)
         except PolyApiException as e:
+            self.logger.debug("%r", e.error_msg)
             self.logger.error("warm up failed: %s", self._error_message(e))
             return False
-        self.logger.debug("warm up success")
         return True
 
     def fee_rate(self, market: Market) -> float:
@@ -90,30 +93,64 @@ class TradeClient:
         self.logger.debug("token (%s) balance: %.6f", token.outcome.lower(), shares)
         return shares
 
-    def get_order(self, order_id: str) -> dict[str, Any] | None:
+    def get_order_by_id(self, order_id: str) -> Order | None:
         try:
-            return self.client.get_order(order_id)
+            resp = self.client.get_order(order_id)
+            self.logger.debug("%r", resp)
         except PolyApiException as e:
-            self.logger.error("get_order failed: %s", self._error_message(e))
+            self.logger.debug("%r", e.error_msg)
+            self.logger.error("get order failed: %s", self._error_message(e))
             return None
 
-    def get_orders(self, token: Token | None = None) -> Any:
-        token_id = token.id if token else None
-        params = OpenOrderParams(asset_id=token_id) if token_id else OpenOrderParams()
-        return self.client.get_orders(params)
+        if not isinstance(resp, dict):
+            self.logger.error("invalid response: %r", resp)
+            return None
+
+        try:
+            return Order.from_metadata(self._order_metadata(resp))
+        except (KeyError, TypeError, ValueError) as e:
+            self.logger.error("invalid response: %s", e)
+            return None
+
+    def get_orders_by_token(self, token: Token) -> list[Order]:
+        try:
+            params = OpenOrderParams(asset_id=token.id)
+            resp = self.client.get_orders(params)
+            self.logger.debug("%r", resp)
+        except PolyApiException as e:
+            self.logger.debug("%r", e.error_msg)
+            self.logger.error("get orders failed: %s", self._error_message(e))
+            return []
+
+        if not isinstance(resp, list):
+            self.logger.error("invalid response: %r", resp)
+            return []
+
+        orders: list[Order] = []
+        for item in resp:
+            if not isinstance(item, dict):
+                self.logger.error("invalid response: %r", item)
+                continue
+            try:
+                orders.append(Order.from_metadata(self._order_metadata(item)))
+            except (KeyError, TypeError, ValueError) as e:
+                self.logger.error("invalid response: %s", e)
+        return orders
 
     def cancel_order(self, order_id: str) -> bool:
         try:
-            response = self.client.cancel(order_id)
+            resp = self.client.cancel(order_id)
+            self.logger.debug("%r", resp)
         except PolyApiException as e:
-            self.logger.error("cancel failed: %s", self._error_message(e))
+            self.logger.debug("%r", e.error_msg)
+            self.logger.error("cancel order failed: %s", self._error_message(e))
             return False
 
-        success_list = response.get("canceled", []) if isinstance(response, dict) else []
+        success_list = resp.get("canceled", []) if isinstance(resp, dict) else []
         if order_id in success_list:
             return True
 
-        failed_dict = response.get("not_canceled", {}) if isinstance(response, dict) else {}
+        failed_dict = resp.get("not_canceled", {}) if isinstance(resp, dict) else {}
         failed_reason = (
             failed_dict.get(order_id, "unknown reason")
             if isinstance(failed_dict, dict)
@@ -144,10 +181,10 @@ class TradeClient:
             submit_start_ns = time.perf_counter_ns()
             try:
                 resp = self.client.post_order(order, post_only=self.post_only)
+                self.logger.debug("%r", resp)
             finally:
                 submit_latency_ms = (time.perf_counter_ns() - submit_start_ns) / 1_000_000
                 self.logger.info("submit order latency %.3f ms", submit_latency_ms)
-            self.logger.debug("%r", resp)
 
             if not isinstance(resp, dict):
                 self.logger.error("invalid response: %r", resp)
@@ -167,8 +204,22 @@ class TradeClient:
 
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("%s", self._error_message(e))
+            self.logger.error("submit order failed: %s", self._error_message(e))
             return None
+
+    @staticmethod
+    def _order_metadata(data: Mapping[str, Any]) -> OrderMetadata:
+        return {
+            "id": data["id"],
+            "type": data["order_type"],
+            "side": data["side"],
+            "status": data["status"],
+            "market_id": data["market"],
+            "token_id": data["asset_id"],
+            "shares": float(data["original_size"]),
+            "matched": float(data["size_matched"]),
+            "price": float(data["price"]),
+        }
 
     @staticmethod
     def _error_message(error: PolyApiException) -> str:

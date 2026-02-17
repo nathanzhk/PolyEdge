@@ -2,20 +2,24 @@ import json
 
 import requests
 
+from common.logger import get_logger
 from schemas.http_responses import MarketMetadata
 
 _GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
+
+logger = get_logger("MARKET API")
 
 
 def get_market_by_slug(slug: str) -> MarketMetadata | None:
     try:
         resp = requests.get(f"{_GAMMA_BASE_URL}/markets/slug/{slug}", timeout=(1, 2))
         resp.raise_for_status()
-        market = resp.json()
-    except requests.RequestException:
+    except requests.RequestException as e:
+        logger.error("get market failed: %s", e)
         return None
 
     try:
+        market = resp.json()
         condition_id = market["conditionId"]
         title = market["question"]
         fee_rate = float(market["feeSchedule"]["rate"])
@@ -24,7 +28,8 @@ def get_market_by_slug(slug: str) -> MarketMetadata | None:
         if len(outcomes) != len(token_ids):
             return None
         tokens = dict(zip(outcomes, token_ids))
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError) as e:
+        logger.error("invalid response: %s", e)
         return None
 
     return {

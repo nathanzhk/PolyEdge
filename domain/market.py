@@ -2,13 +2,14 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 from adapters.market_api import get_market_by_slug
-from common import time
+from common.time import current_5m_window_s
 
 
 @dataclass(slots=True, frozen=True)
 class Token:
     id: str
     outcome: str
+    market_id: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -34,12 +35,12 @@ class Btc5mMarket(Market):
 
     @classmethod
     def now(cls) -> "Btc5mMarket":
-        start_ts_s, end_ts_s = time.current_5m_window_s()
+        start_ts_s, end_ts_s = current_5m_window_s()
         return cls._from_window(start_ts_s, end_ts_s)
 
     @classmethod
     def next(cls) -> "Btc5mMarket":
-        _, current_end_ts_s = time.current_5m_window_s()
+        _, current_end_ts_s = current_5m_window_s()
         start_ts_s = current_end_ts_s
         end_ts_s = start_ts_s + cls.interval_s
         return cls._from_window(start_ts_s, end_ts_s)
@@ -52,8 +53,9 @@ class Btc5mMarket(Market):
         if metadata is None:
             raise ValueError(f"market not found: {slug}")
 
+        market_id = metadata["id"]
         return cls(
-            id=metadata["id"],
+            id=market_id,
             slug=slug,
             title=metadata["title"],
             start_ts_s=start_ts_s,
@@ -63,10 +65,12 @@ class Btc5mMarket(Market):
             yes_token=Token(
                 id=metadata["tokens"][cls.up_outcome],
                 outcome=cls.up_outcome,
+                market_id=market_id,
             ),
             no_token=Token(
                 id=metadata["tokens"][cls.down_outcome],
                 outcome=cls.down_outcome,
+                market_id=market_id,
             ),
             fee_rate=metadata["fee_rate"],
         )
