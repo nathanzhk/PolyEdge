@@ -90,7 +90,7 @@ class TradeClient:
             asset_type=AssetType.CONDITIONAL,  # type: ignore
         )
         shares = self._get_balance(params)
-        self.logger.debug("token (%s) balance: %.6f", token.outcome.lower(), shares)
+        self.logger.debug("token (%s) balance: %.6f", token.key, shares)
         return shares
 
     def get_order_by_id(self, order_id: str) -> Order | None:
@@ -169,7 +169,7 @@ class TradeClient:
         return round(int(balance) / 1_000_000, 6)
 
     def _submit_order(self, *, token: Token, shares: float, price: float, side: str) -> str | None:
-        self.logger.info("%s %s %.6f at $%.2f", side.lower(), token.outcome.lower(), shares, price)
+        self.logger.info("%s %s %.6f at $%.2f", side.lower(), token.key, shares, price)
         try:
             create_start_ns = time.perf_counter_ns()
             order = self.client.create_order(

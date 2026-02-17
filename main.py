@@ -2,7 +2,8 @@ from dotenv import load_dotenv
 
 from adapters.trade_client import MakerTradeClient
 from common.logger import configure_logging
-from domain.market import Btc5mMarket, Market
+from domain.btc_market import BTC5mMarket
+from domain.market import Market
 
 
 def main():
@@ -10,7 +11,7 @@ def main():
     configure_logging()
 
     maker = MakerTradeClient()
-    market: Market = Btc5mMarket.now()
+    market: Market = BTC5mMarket.now()
 
     maker.warm_up(market.yes_token)
     maker.warm_up(market.no_token)
