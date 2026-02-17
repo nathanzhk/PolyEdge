@@ -10,11 +10,11 @@ class MarketMetadata(TypedDict):
 
 class OrderMetadata(TypedDict):
     id: str
-    type: Literal["GTC", "FOK", "GTD", "FAK"] | str
     side: Literal["BUY", "SELL"] | str
-    status: Literal["LIVE", "FILLED", "CANCELED", "EXPIRED", "MATCHED", "UNMATCHED"] | str
+    type: Literal["GTC", "GTD", "FOK", "FAK"] | str
+    status: Literal["LIVE", "DELAYED", "MATCHED", "UNMATCHED"] | str
+    ordered_shares: float
+    matched_shares: float
     market_id: str
     token_id: str
-    shares: float
-    matched: float
     price: float

@@ -211,13 +211,13 @@ class TradeClient:
     def _order_metadata(data: Mapping[str, Any]) -> OrderMetadata:
         return {
             "id": data["id"],
-            "type": data["order_type"],
             "side": data["side"],
+            "type": data["order_type"],
             "status": data["status"],
+            "ordered_shares": float(data["original_size"]),
+            "matched_shares": float(data["size_matched"]),
             "market_id": data["market"],
             "token_id": data["asset_id"],
-            "shares": float(data["original_size"]),
-            "matched": float(data["size_matched"]),
             "price": float(data["price"]),
         }
 
