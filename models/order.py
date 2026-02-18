@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from schemas.http_responses import OrderMetadata
+from models.metadata import OrderMetadata
 
 OrderSide = Literal["BUY", "SELL"]
 OrderType = Literal["GTC", "GTD", "FOK", "FAK"]

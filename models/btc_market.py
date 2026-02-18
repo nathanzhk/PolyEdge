@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from adapters.market_api import get_market_by_slug
-from common.time import current_5m_window_s, current_15m_window_s
-from domain.market import Market, Token
+from models.market import Market, Token
+from utils.market import get_market_by_slug
+from utils.time import current_5m_window_s, current_15m_window_s
 
 UP_OUTCOME = "Up"
 DOWN_OUTCOME = "Down"
@@ -18,16 +18,14 @@ class _BTCMarket(Market):
     window_func: ClassVar[staticmethod[[], tuple[int, int]]]
 
     @classmethod
-    def now(cls) -> Self:
+    def curr_market(cls) -> Self:
         start_ts_s, end_ts_s = cls.window_func()
         return cls._from_window(start_ts_s, end_ts_s)
 
-    @classmethod
-    def next(cls) -> Self:
-        _, current_end_ts_s = cls.window_func()
-        start_ts_s = current_end_ts_s
-        end_ts_s = start_ts_s + cls.interval_s
-        return cls._from_window(start_ts_s, end_ts_s)
+    def next_market(self) -> Self:
+        start_ts_s = self.end_ts_s
+        end_ts_s = start_ts_s + self.interval_s
+        return type(self)._from_window(start_ts_s, end_ts_s)
 
     @classmethod
     def _from_window(cls, start_ts_s: int, end_ts_s: int) -> Self:
