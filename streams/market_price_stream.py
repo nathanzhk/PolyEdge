@@ -31,7 +31,7 @@ _STREAM_ENDED = _EndOfStream()
 type _LatestEvent = MarketPriceEvent | _EndOfStream
 
 
-class MarketStream(AsyncIterator[MarketPriceEvent]):
+class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
     def __init__(self, market_type: type[Market]) -> None:
         self._market_type = market_type
         self._market: Market | None = None
@@ -203,8 +203,8 @@ def _build_event(data: dict[str, Any], market: Market, ts_ms: int) -> MarketPric
     return MarketPriceEvent(
         ts_ms=ts_ms,
         market=market,
-        bid_yes=round(float(bid_yes_raw), 2),
-        ask_yes=round(float(ask_yes_raw), 2),
-        bid_no=round(float(bid_no_raw), 2),
-        ask_no=round(float(ask_no_raw), 2),
+        bid_yes=round(float(bid_yes_raw), 3),
+        ask_yes=round(float(ask_yes_raw), 3),
+        bid_no=round(float(bid_no_raw), 3),
+        ask_no=round(float(ask_no_raw), 3),
     )
