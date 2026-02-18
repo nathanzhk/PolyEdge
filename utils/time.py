@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 WINDOW_5M_S = 5 * 60
@@ -10,6 +11,12 @@ def now_ts_s() -> int:
 
 def now_ts_ms() -> int:
     return time.time_ns() // 1_000_000
+
+
+async def sleep_until(ts_s: int) -> None:
+    delay_s = ts_s - now_ts_s()
+    if delay_s > 0:
+        await asyncio.sleep(delay_s)
 
 
 def current_5m_window_s() -> tuple[int, int]:
