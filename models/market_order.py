@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from models.metadata import OrderMetadata
+from models.metadata import MarketOrderMetadata
 
 OrderSide = Literal["BUY", "SELL"]
 OrderType = Literal["GTC", "GTD", "FOK", "FAK"]
@@ -11,7 +11,7 @@ MATCHED_SHARES_GAP = 0.1
 
 
 @dataclass(slots=True, frozen=True)
-class Order:
+class MarketOrder:
     id: str
     side: OrderSide | str
     type: OrderType | str
@@ -23,7 +23,7 @@ class Order:
     price: float
 
     @classmethod
-    def from_metadata(cls, metadata: OrderMetadata) -> "Order":
+    def from_metadata(cls, metadata: MarketOrderMetadata) -> "MarketOrder":
         return cls(
             id=metadata["id"],
             side=metadata["side"],

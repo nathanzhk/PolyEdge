@@ -8,7 +8,7 @@ class MarketMetadata(TypedDict):
     fee_rate: float
 
 
-class OrderMetadata(TypedDict):
+class MarketOrderMetadata(TypedDict):
     id: str
     side: Literal["BUY", "SELL"] | str
     type: Literal["GTC", "GTD", "FOK", "FAK"] | str
