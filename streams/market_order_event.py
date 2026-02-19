@@ -14,6 +14,7 @@ class MarketOrderEvent:
     market_id: str
     token_id: str
     order_id: str
+    trade_ids: list[str]
     status: MarketOrderEventStatus
     raw_status: str
     ordered_shares: float

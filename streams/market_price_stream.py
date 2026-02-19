@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from typing import Any, NoReturn, Self
 
+import orjson
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
 from utils.logger import get_logger
-from utils.time import sleep_until
+from utils.time import now_ts_ms, sleep_until
 
 _MARKET_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
@@ -20,7 +20,7 @@ _ACTIVATE_BEFORE_MS = 1000
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
 
-logger = get_logger("MARKET STREAM")
+logger = get_logger("MARKET PRICE STREAM")
 
 
 class _EndOfStream:
@@ -32,8 +32,12 @@ type _LatestEvent = MarketPriceEvent | _EndOfStream
 
 
 class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
-    def __init__(self, market_type: type[Market]) -> None:
+    def __init__(self, market_type: type[Market], interval_ms: int) -> None:
+        if interval_ms <= 0:
+            raise ValueError("interval_ms must be greater than 0")
         self._market_type = market_type
+        self._interval_ms = interval_ms
+        self._bucket_ts_ms = 0
         self._market: Market | None = None
         self._stopping = asyncio.Event()
         self._stream_task: asyncio.Task[None] | None = None
@@ -53,6 +57,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
 
     def _ensure_stream_task(self) -> None:
         if self._stream_task is None:
+            self._bucket_ts_ms = now_ts_ms()
             self._stream_task = asyncio.create_task(self._stream_worker())
             self._stream_error = None
 
@@ -82,14 +87,18 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
         await asyncio.gather(self._stream_task, return_exceptions=True)
 
     async def _maintain_connection(self) -> None:
+        logger.info("loading current market")
         self._market = await asyncio.to_thread(self._market_type.curr_market)
+        logger.info("loaded current market %s", self._market.slug)
         while not self._stopping.is_set():
             try:
+                logger.info("connecting market price websocket")
                 async with connect(
                     _MARKET_WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
                 ) as ws:
                     ws_lock = asyncio.Lock()
                     await _initial_subscribe(ws, self._market)
+                    logger.info("connected market price websocket")
                     heartbeat_task = asyncio.create_task(self._heartbeat(ws, ws_lock))
                     lifecycle_task = asyncio.create_task(self._lifecycle(ws, ws_lock))
                     try:
@@ -112,8 +121,8 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                 continue
 
             try:
-                message = json.loads(raw)
-            except (TypeError, json.JSONDecodeError):
+                message = orjson.loads(raw)
+            except (TypeError, orjson.JSONDecodeError):
                 return None
             if not isinstance(message, dict) or message.get("event_type") != "price_change":
                 continue
@@ -130,12 +139,27 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             start_ts_ms, end_ts_ms = market.start_ts_ms, market.end_ts_ms
             if ts_ms < start_ts_ms - _ACTIVATE_BEFORE_MS or ts_ms > end_ts_ms:
                 continue
+            if not self._advance_bucket(ts_ms):
+                continue
 
             event = _build_event(message, market, ts_ms)
             if event is None:
                 continue
+            logger.debug(
+                "market price -> bid_yes=%.2f ask_yes=%.2f bid_no=%.2f ask_no=%.2f",
+                event.bid_yes,
+                event.ask_yes,
+                event.bid_no,
+                event.ask_no,
+            )
 
             self._set_latest(event)
+
+    def _advance_bucket(self, ts_ms: int) -> bool:
+        if ts_ms < self._bucket_ts_ms:
+            return False
+        self._bucket_ts_ms = ts_ms - (ts_ms % self._interval_ms) + self._interval_ms
+        return True
 
     async def _heartbeat(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:
         try:
@@ -172,7 +196,8 @@ def _token_ids(market: Market) -> list[str]:
 
 
 async def _initial_subscribe(ws: ClientConnection, market: Market) -> None:
-    await ws.send(json.dumps({"type": "market", "assets_ids": _token_ids(market)}))
+    payload = {"type": "market", "assets_ids": _token_ids(market)}
+    await ws.send(orjson.dumps(payload).decode("utf-8"))
 
 
 async def _update_subscribe(
@@ -180,7 +205,8 @@ async def _update_subscribe(
 ) -> None:
     logger.debug("%s market %s", operation, market.slug)
     async with ws_lock:
-        await ws.send(json.dumps({"operation": operation, "assets_ids": _token_ids(market)}))
+        payload = {"operation": operation, "assets_ids": _token_ids(market)}
+        await ws.send(orjson.dumps(payload).decode("utf-8"))
 
 
 def _build_event(data: dict[str, Any], market: Market, ts_ms: int) -> MarketPriceEvent | None:

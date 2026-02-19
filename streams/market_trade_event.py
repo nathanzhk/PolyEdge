@@ -5,7 +5,7 @@ from enum import StrEnum
 class MarketTradeEventStatus(StrEnum):
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
-    INVALID = "INVALID"
+    FAILURE = "FAILURE"
 
 
 @dataclass(slots=True, frozen=True)

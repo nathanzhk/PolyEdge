@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 
+import orjson
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
@@ -28,7 +28,9 @@ class CryptoPriceStream:
     async def _stream(self) -> AsyncIterator[CryptoPriceEvent]:
         while True:
             try:
+                logger.info("connecting crypto price websocket %s", self._symbol.upper())
                 async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
+                    logger.info("connected crypto price websocket %s", self._symbol.upper())
                     async for raw in ws:
                         event = self._build_event(raw)
                         if event is not None:
@@ -39,8 +41,8 @@ class CryptoPriceStream:
 
     def _build_event(self, raw: str | bytes) -> CryptoPriceEvent | None:
         try:
-            message = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
+            message = orjson.loads(raw)
+        except (TypeError, orjson.JSONDecodeError):
             return None
         if not isinstance(message, dict) or message.get("e") != "aggTrade":
             return None
@@ -65,7 +67,9 @@ class CryptoOhlcvStream:
     async def _stream(self) -> AsyncIterator[CryptoOHLCVEvent]:
         while True:
             try:
+                logger.info("connecting crypto ohlcv websocket %s", self._symbol.upper())
                 async with connect(self._es_url, ping_interval=20, ping_timeout=20) as ws:
+                    logger.info("connected crypto ohlcv websocket %s", self._symbol.upper())
                     async for raw in ws:
                         event = self._build_event(raw)
                         if event is not None:
@@ -76,8 +80,8 @@ class CryptoOhlcvStream:
 
     def _build_event(self, raw: str | bytes) -> CryptoOHLCVEvent | None:
         try:
-            message = json.loads(raw)
-        except (TypeError, json.JSONDecodeError):
+            message = orjson.loads(raw)
+        except (TypeError, orjson.JSONDecodeError):
             return None
         if not isinstance(message, dict) or message.get("e") != "kline":
             return None
