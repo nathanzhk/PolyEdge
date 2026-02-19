@@ -1,5 +1,4 @@
-import json
-
+import orjson
 import requests
 
 from models.metadata import MarketMetadata
@@ -19,12 +18,12 @@ def get_market_by_slug(slug: str) -> MarketMetadata | None:
         return None
 
     try:
-        market = resp.json()
+        market = orjson.loads(resp.content)
         condition_id = market["conditionId"]
         title = market["question"]
         fee_rate = float(market["feeSchedule"]["rate"])
-        outcomes = json.loads(market["outcomes"])
-        token_ids = json.loads(market["clobTokenIds"])
+        outcomes = orjson.loads(market["outcomes"])
+        token_ids = orjson.loads(market["clobTokenIds"])
         if len(outcomes) != len(token_ids):
             return None
         tokens = dict(zip(outcomes, token_ids))
