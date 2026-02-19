@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import (
+    ApiCreds,
     AssetType,
     BalanceAllowanceParams,
     OpenOrderParams,
@@ -14,8 +15,8 @@ from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
 from models.market import Market, Token
-from models.metadata import OrderMetadata
-from models.order import Order
+from models.market_order import MarketOrder
+from models.metadata import MarketOrderMetadata
 from utils.logger import get_logger
 
 TradeRole = Literal["maker", "taker"]
@@ -40,7 +41,11 @@ class TradeClient:
             chain_id=137,
             signature_type=2,
         )
-        self.client.set_api_creds(self.client.create_or_derive_api_creds())
+        self.credentials = self.get_credentials()
+        self.client.set_api_creds(self.credentials)
+
+    def get_credentials(self) -> ApiCreds:
+        return self.client.create_or_derive_api_creds()
 
     def buy(self, token: Token, shares: float, price: float) -> str | None:
         return self._submit_order(token=token, shares=shares, price=price, side=BUY)
@@ -85,7 +90,7 @@ class TradeClient:
         self.logger.debug("token shares: %.6f", shares)
         return shares
 
-    def get_order_by_id(self, order_id: str) -> Order | None:
+    def get_order_by_id(self, order_id: str) -> MarketOrder | None:
         try:
             resp = self.client.get_order(order_id)
             self.logger.debug("%r", resp)
@@ -99,12 +104,12 @@ class TradeClient:
             return None
 
         try:
-            return Order.from_metadata(self._order_metadata(resp))
+            return MarketOrder.from_metadata(self._order_metadata(resp))
         except (KeyError, TypeError, ValueError) as e:
             self.logger.error("invalid response: %s", e)
             return None
 
-    def get_orders_by_token(self, token: Token) -> list[Order]:
+    def get_orders_by_token(self, token: Token) -> list[MarketOrder]:
         try:
             params = OpenOrderParams(asset_id=token.id)
             resp = self.client.get_orders(params)
@@ -118,13 +123,13 @@ class TradeClient:
             self.logger.error("invalid response: %r", resp)
             return []
 
-        orders: list[Order] = []
+        orders: list[MarketOrder] = []
         for item in resp:
             if not isinstance(item, dict):
                 self.logger.error("invalid response: %r", item)
                 continue
             try:
-                orders.append(Order.from_metadata(self._order_metadata(item)))
+                orders.append(MarketOrder.from_metadata(self._order_metadata(item)))
             except (KeyError, TypeError, ValueError) as e:
                 self.logger.error("invalid response: %s", e)
         return orders
@@ -210,7 +215,7 @@ class TradeClient:
             return None
 
     @staticmethod
-    def _order_metadata(data: Mapping[str, Any]) -> OrderMetadata:
+    def _order_metadata(data: Mapping[str, Any]) -> MarketOrderMetadata:
         return {
             "id": data["id"],
             "side": data["side"],
