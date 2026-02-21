@@ -121,7 +121,7 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
             except (ConnectionClosed, ConnectionError, OSError) as e:
                 if self._stopping.is_set():
                     break
-                logger.error("websocket disconnected: %s", e)
+                logger.error("disconnected market trade websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
     async def _receive_message(self, ws: ClientConnection) -> None:

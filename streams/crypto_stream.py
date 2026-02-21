@@ -34,9 +34,9 @@ class CryptoPriceStream:
     async def _stream(self) -> AsyncIterator[CryptoPriceEvent]:
         while True:
             try:
-                logger.info("connecting crypto price websocket %s", self._symbol.upper())
+                logger.info("connecting crypto price websocket: %s", self._symbol.upper())
                 async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
-                    logger.info("connected crypto price websocket %s", self._symbol.upper())
+                    logger.info("connected crypto price websocket: %s", self._symbol.upper())
                     async for raw in ws:
                         message = self._parse_message(raw)
                         if message is None:
@@ -47,10 +47,9 @@ class CryptoPriceStream:
                         event = self._build_event(message, ts_ms)
                         if event is None:
                             continue
-                        logger.debug("crypto price -> %s=%.2f", event.symbol, event.price)
                         yield event
             except (ConnectionClosed, ConnectionError, OSError) as e:
-                logger.error("websocket disconnected: %s", e)
+                logger.error("disconnected crypto price websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
     def _parse_message(self, raw: str | bytes) -> dict[str, Any] | None:
@@ -96,9 +95,9 @@ class CryptoOHLCVStream:
     async def _stream(self) -> AsyncIterator[CryptoOHLCVEvent]:
         while True:
             try:
-                logger.info("connecting crypto ohlcv websocket %s", self._symbol.upper())
+                logger.info("connecting crypto ohlcv websocket: %s", self._symbol.upper())
                 async with connect(self._es_url, ping_interval=20, ping_timeout=20) as ws:
-                    logger.info("connected crypto ohlcv websocket %s", self._symbol.upper())
+                    logger.info("connected crypto ohlcv websocket: %s", self._symbol.upper())
                     async for raw in ws:
                         message = self._parse_message(raw)
                         if message is None:
@@ -111,7 +110,7 @@ class CryptoOHLCVStream:
                             continue
                         yield event
             except (ConnectionClosed, ConnectionError, OSError) as e:
-                logger.error("websocket disconnected: %s", e)
+                logger.error("disconnected crypto ohlcv websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
     def _parse_message(self, raw: str | bytes) -> dict[str, Any] | None:

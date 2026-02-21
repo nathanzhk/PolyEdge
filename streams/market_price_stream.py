@@ -16,7 +16,7 @@ from utils.time import sleep_until
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 _SWITCH_BEFORE_END_S = 5
-_ACTIVATE_BEFORE_MS = 1_000
+_ACTIVATE_BEFORE_MS = 2_000
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
@@ -89,7 +89,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
     async def _maintain_connection(self) -> None:
         logger.info("loading current market")
         self._market = await asyncio.to_thread(self._market_type.curr_market)
-        logger.info("loaded current market %s", self._market.slug)
+        logger.info("loaded current market: %s", self._market.slug)
         while not self._stopping.is_set():
             try:
                 logger.info("connecting market price websocket")
@@ -112,7 +112,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             except (ConnectionClosed, ConnectionError, OSError) as e:
                 if self._stopping.is_set():
                     break
-                logger.error("websocket disconnected: %s", e)
+                logger.error("disconnected market price websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
     async def _receive_message(self, ws: ClientConnection) -> None:
@@ -145,14 +145,6 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             event = _build_event(message, market, ts_ms)
             if event is None:
                 continue
-            logger.debug(
-                "market price -> bid_yes=%.2f ask_yes=%.2f bid_no=%.2f ask_no=%.2f",
-                event.bid_yes,
-                event.ask_yes,
-                event.bid_no,
-                event.ask_no,
-            )
-
             self._set_latest(event)
 
     def _advance_bucket(self, ts_ms: int) -> bool:
@@ -180,7 +172,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             next_market = await asyncio.to_thread(curr_market.next_market)
             await _update_subscribe(ws, ws_lock, "subscribe", next_market)
             self._market = next_market
-            logger.info("switch market from %s to %s", curr_market.slug, next_market.slug)
+            logger.debug("switch market from %s to %s", curr_market.slug, next_market.slug)
 
     def _set_latest(self, item: _LatestEvent) -> None:
         if self._latest_event.full():
