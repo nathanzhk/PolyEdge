@@ -4,6 +4,7 @@ from indicators.indicator import MacdValue
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
+from trade.models import TradeLatestState
 
 
 @dataclass(slots=True, frozen=True)
@@ -22,3 +23,4 @@ class IndicatorLatestState:
 class StrategyContext:
     market: MarketLatestState
     indicators: IndicatorLatestState
+    trade: TradeLatestState | None = None
