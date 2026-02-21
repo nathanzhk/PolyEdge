@@ -17,7 +17,7 @@ from streams.market_trade_event import (
 )
 from utils.logger import get_logger
 
-_USER_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
+_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
@@ -35,7 +35,7 @@ _TRADE_STATUS_MAP: dict[str, MarketTradeEventStatus] = {
     "FAILED": MarketTradeEventStatus.FAILURE,
 }
 
-logger = get_logger("MARKET TRADE STREAM")
+logger = get_logger("MARKET STREAM")
 
 
 class _EndOfStream:
@@ -105,7 +105,7 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
             try:
                 logger.info("connecting market trade websocket")
                 async with connect(
-                    _USER_WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
+                    _WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
                 ) as ws:
                     ws_lock = asyncio.Lock()
                     await _initial_subscribe(ws, self._credentials)

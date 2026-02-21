@@ -11,16 +11,17 @@ from websockets.exceptions import ConnectionClosed
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
 from utils.logger import get_logger
-from utils.time import now_ts_ms, sleep_until
+from utils.time import sleep_until
 
-_MARKET_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 _SWITCH_BEFORE_END_S = 5
-_ACTIVATE_BEFORE_MS = 1000
+_ACTIVATE_BEFORE_MS = 1_000
+
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
 
-logger = get_logger("MARKET PRICE STREAM")
+logger = get_logger("MARKET STREAM")
 
 
 class _EndOfStream:
@@ -37,7 +38,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             raise ValueError("interval_ms must be greater than 0")
         self._market_type = market_type
         self._interval_ms = interval_ms
-        self._bucket_ts_ms = 0
+        self._next_bucket_ts_ms = 0
         self._market: Market | None = None
         self._stopping = asyncio.Event()
         self._stream_task: asyncio.Task[None] | None = None
@@ -57,7 +58,6 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
 
     def _ensure_stream_task(self) -> None:
         if self._stream_task is None:
-            self._bucket_ts_ms = now_ts_ms()
             self._stream_task = asyncio.create_task(self._stream_worker())
             self._stream_error = None
 
@@ -94,7 +94,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             try:
                 logger.info("connecting market price websocket")
                 async with connect(
-                    _MARKET_WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
+                    _WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
                 ) as ws:
                     ws_lock = asyncio.Lock()
                     await _initial_subscribe(ws, self._market)
@@ -156,9 +156,9 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             self._set_latest(event)
 
     def _advance_bucket(self, ts_ms: int) -> bool:
-        if ts_ms < self._bucket_ts_ms:
+        if ts_ms < self._next_bucket_ts_ms:
             return False
-        self._bucket_ts_ms = ts_ms - (ts_ms % self._interval_ms) + self._interval_ms
+        self._next_bucket_ts_ms = ts_ms - (ts_ms % self._interval_ms) + self._interval_ms
         return True
 
     async def _heartbeat(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:

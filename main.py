@@ -28,7 +28,7 @@ async def run() -> None:
     runner = Runner(
         market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=100),
         market_trade_stream=MarketTradeStream(maker.credentials),
-        crypto_price_stream=CryptoPriceStream("btcusdt"),
+        crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=100),
         strategy=LoggingStrategy(),
         execution_engine=ExecutionEngine(maker, taker),
     )
