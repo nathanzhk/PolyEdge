@@ -11,6 +11,7 @@ from trade.models import TradeLatestState
 @dataclass(slots=True, frozen=True)
 class MarketLatestState:
     market: Market | None
+    beat_price: float | None
     market_price: MarketPriceEvent | None
     crypto_price: CryptoPriceEvent | None
     crypto_ohlcv: CryptoOHLCVEvent | None

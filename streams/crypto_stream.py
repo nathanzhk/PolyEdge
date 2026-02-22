@@ -71,7 +71,7 @@ class CryptoPriceStream:
         try:
             return CryptoPriceEvent(
                 ts_ms=ts_ms,
-                symbol=str(message["s"]),
+                symbol=str(message["s"]).upper(),
                 price=round(float(message["p"]), 3),
             )
         except (KeyError, TypeError, ValueError):
@@ -138,7 +138,7 @@ class CryptoOHLCVStream:
         try:
             return CryptoOHLCVEvent(
                 ts_ms=ts_ms,
-                symbol=str(ohlcv["s"]),
+                symbol=str(ohlcv["s"]).upper(),
                 open=float(ohlcv["o"]),
                 high=float(ohlcv["h"]),
                 low=float(ohlcv["l"]),
