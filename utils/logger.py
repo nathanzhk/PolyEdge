@@ -4,9 +4,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from utils.time import DATE_TIME_MS_FORMAT
+
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
-_DATE_TIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 _COLOR_RESET = "\033[0m"
 _LEVEL_COLORS = {
@@ -28,7 +29,7 @@ _CONSOLE_HANDLER: logging.Handler | None = None
 class _Formatter(logging.Formatter):
     def formatTime(self, record, datefmt: str | None = None):
         record_time = datetime.fromtimestamp(record.created)
-        return record_time.strftime(_DATE_TIME_FORMAT)[:-3]
+        return record_time.strftime(DATE_TIME_MS_FORMAT)[:-3]
 
 
 class _ColorFormatter(_Formatter):

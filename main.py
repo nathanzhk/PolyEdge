@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from models.btc_market import BTC5mMarket
 from runtime.runner import Runner
 from strategies.logging_strategy import LoggingStrategy
-from streams.crypto_stream import CryptoPriceStream
+from streams.crypto_stream import CryptoTradeStream
 from streams.market_price_stream import MarketPriceStream
 from streams.market_trade_stream import MarketTradeStream
 from trade.execution_engine import ExecutionEngine
@@ -28,7 +28,7 @@ async def run() -> None:
     runner = Runner(
         market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=100),
         market_trade_stream=MarketTradeStream(maker.credentials),
-        crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=100),
+        crypto_price_stream=CryptoTradeStream("btcusdt", interval_ms=20),
         strategy=LoggingStrategy(),
         execution_engine=ExecutionEngine(maker, taker),
     )

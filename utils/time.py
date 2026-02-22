@@ -1,8 +1,10 @@
 import asyncio
 import time
+from datetime import datetime
 
 WINDOW_5M_S = 5 * 60
 WINDOW_15M_S = 15 * 60
+DATE_TIME_MS_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 
 def now_ts_s() -> int:
@@ -11,6 +13,11 @@ def now_ts_s() -> int:
 
 def now_ts_ms() -> int:
     return time.time_ns() // 1_000_000
+
+
+def format_ts_ms(ts_ms: int) -> str:
+    dt = datetime.fromtimestamp(ts_ms / 1_000)
+    return dt.strftime(DATE_TIME_MS_FORMAT)[:-3]
 
 
 async def sleep_until(ts_s: int) -> None:

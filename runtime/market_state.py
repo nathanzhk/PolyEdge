@@ -8,6 +8,7 @@ from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
 from utils.logger import get_logger
+from utils.time import format_ts_ms
 
 logger = get_logger("MARKET STATE")
 
@@ -19,6 +20,7 @@ class MarketState:
         self._lock = asyncio.Lock()
         self._market: Market | None = None
         self._beat_price: float | None = None
+        self._beat_offset_ms: int | None = None
         self._market_price: MarketPriceEvent | None = None
         self._crypto_price: CryptoPriceEvent | None = None
         self._crypto_ohlcv: CryptoOHLCVEvent | None = None
@@ -29,13 +31,15 @@ class MarketState:
             if self._market is None or self._market.id != price.market.id:
                 self._market = price.market
                 self._beat_price = None
-            logger.info(
-                "market price -> bid_yes=%.2f ask_yes=%.2f bid_no=%.2f ask_no=%.2f",
-                price.bid_yes,
-                price.ask_yes,
-                price.bid_no,
-                price.ask_no,
-            )
+                self._beat_offset_ms = None
+            # logger.info(
+            #     "%s market price -> bid_yes=%.2f ask_yes=%.2f bid_no=%.2f ask_no=%.2f",
+            #     format_ts_ms(price.ts_ms),
+            #     price.bid_yes,
+            #     price.ask_yes,
+            #     price.bid_no,
+            #     price.ask_no,
+            # )
 
     async def update_crypto_price(self, price: CryptoPriceEvent) -> None:
         async with self._lock:
@@ -43,7 +47,8 @@ class MarketState:
             self._record_beat_price()
             if self._beat_price is None:
                 logger.info(
-                    "crypto price -> %s=%.2f beat=N/A",
+                    "%s crypto price -> %s=%.2f beat=N/A",
+                    format_ts_ms(price.ts_ms),
                     price.symbol,
                     price.price,
                 )
@@ -51,7 +56,8 @@ class MarketState:
                 beat_diff = price.price - self._beat_price
                 beat_pct = beat_diff / self._beat_price * 100
                 logger.info(
-                    "crypto price -> %s=%.2f diff=%+.2f %+.3f%%",
+                    "%s crypto price -> %s=%.2f diff=%+.2f %+.3f%%",
+                    format_ts_ms(price.ts_ms),
                     price.symbol,
                     price.price,
                     beat_diff,
@@ -73,16 +79,21 @@ class MarketState:
             )
 
     def _record_beat_price(self) -> None:
-        if self._beat_price is not None:
-            return
         if self._market is None or self._crypto_price is None:
             return
         beat_offset_ms = self._crypto_price.ts_ms - self._market.start_ts_ms
-        if beat_offset_ms < 0 or beat_offset_ms > _MAX_BEAT_OFFSET_MS:
+        beat_offset_abs_ms = abs(beat_offset_ms)
+        if beat_offset_abs_ms > _MAX_BEAT_OFFSET_MS:
+            return
+        should_update = self._beat_offset_ms is None or beat_offset_abs_ms < abs(
+            self._beat_offset_ms
+        )
+        if not should_update:
             return
         self._beat_price = self._crypto_price.price
+        self._beat_offset_ms = beat_offset_ms
         logger.info(
-            "beat price -> %s=%.2f offset_ms=%d market=%s",
+            "beat price -> %s=%.2f offset_ms=%+d market=%s",
             self._crypto_price.symbol,
             self._beat_price,
             beat_offset_ms,

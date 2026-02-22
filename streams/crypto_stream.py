@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
+from warnings import deprecated
 
 import orjson
 from websockets.asyncio.client import connect
@@ -19,7 +20,8 @@ _RECONNECT_DELAY_S = 2
 logger = get_logger("CRYPTO STREAM")
 
 
-class CryptoPriceStream:
+@deprecated("")
+class CryptoTradeStream:
     def __init__(self, symbol: str = "btcusdt", interval_ms: int = 100) -> None:
         if interval_ms <= 0:
             raise ValueError("interval_ms must be greater than 0")
