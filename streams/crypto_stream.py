@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from time import perf_counter_ns
 from typing import Any
 
 import orjson
@@ -10,6 +11,7 @@ from websockets.exceptions import ConnectionClosed
 
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
+from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -25,9 +27,10 @@ class CryptoPriceStream:
         if interval_ms <= 0:
             raise ValueError("interval_ms must be greater than 0")
         self._symbol = symbol.lower()
+        self._ws_url = f"{_BASE_URL}/{self._symbol}@bookTicker"
         self._interval_ms = interval_ms
         self._next_bucket_ts_ms = 0
-        self._ws_url = f"{_BASE_URL}/{self._symbol}@bookTicker"
+        self._parse_latency = LatencyStats("crypto price parse latency", logger)
 
     def __aiter__(self) -> AsyncIterator[CryptoPriceEvent]:
         return self._stream()
@@ -42,7 +45,9 @@ class CryptoPriceStream:
                         recv_ts_ms = now_ts_ms()
                         if not self._advance_bucket(recv_ts_ms):
                             continue
+                        started_at_ns = perf_counter_ns()
                         message = self._parse_message(raw)
+                        self._parse_latency.record_ns(started_at_ns)
                         if message is None:
                             continue
                         event = self._build_event(message, recv_ts_ms)

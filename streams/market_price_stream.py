@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from time import perf_counter_ns
 from typing import Any, NoReturn, Self
 
 import orjson
@@ -10,6 +11,7 @@ from websockets.exceptions import ConnectionClosed
 
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
+from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
 from utils.time import now_ts_ms, sleep_until
 
@@ -44,6 +46,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_error: BaseException | None = None
         self._latest_event: asyncio.Queue[_LatestEvent] = asyncio.Queue(maxsize=1)
+        self._parse_latency = LatencyStats("market price parse latency", logger)
 
     def __aiter__(self) -> Self:
         self._ensure_stream_task()
@@ -108,7 +111,9 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                             recv_ts_ms = now_ts_ms()
                             if not self._advance_bucket(recv_ts_ms):
                                 continue
+                            started_at_ns = perf_counter_ns()
                             self._handle_message(raw)
+                            self._parse_latency.record_ns(started_at_ns)
                     finally:
                         heartbeat_task.cancel()
                         lifecycle_task.cancel()

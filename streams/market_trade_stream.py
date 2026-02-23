@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from time import perf_counter_ns
 from typing import Any, NoReturn, Self
 
 import orjson
@@ -15,6 +16,7 @@ from streams.market_trade_event import (
     MarketTradeEvent,
     MarketTradeEventStatus,
 )
+from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
 
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
@@ -58,6 +60,7 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
         self._stopping = asyncio.Event()
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_error: BaseException | None = None
+        self._parse_latency = LatencyStats("market trade parse latency", logger)
 
     def __aiter__(self) -> Self:
         self._ensure_stream_task()
@@ -115,7 +118,9 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                         async for raw in ws:
                             if raw == "PONG":
                                 continue
+                            started_at_ns = perf_counter_ns()
                             self._handle_message(raw)
+                            self._parse_latency.record_ns(started_at_ns)
                     finally:
                         heartbeat_task.cancel()
                         await asyncio.gather(heartbeat_task, return_exceptions=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import AsyncIterable
+from time import perf_counter_ns
 
 from runtime.indicator_engine import IndicatorEngine
 from runtime.indicator_state import IndicatorState
@@ -14,6 +15,7 @@ from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
 from streams.market_trade_stream import MarketUserEvent
 from trade.execution_engine import ExecutionEngine
+from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
 
 logger = get_logger("RUNTIME")
@@ -23,8 +25,11 @@ async def market_price_loop(
     stream: AsyncIterable[MarketPriceEvent],
     market_state: MarketState,
 ) -> None:
+    latency = LatencyStats("market tick latency", logger)
     async for price in stream:
+        started_at_ns = perf_counter_ns()
         await market_state.update_market_price(price)
+        latency.record_ns(started_at_ns)
 
 
 async def market_trade_loop(
@@ -40,9 +45,12 @@ async def crypto_price_loop(
     market_state: MarketState,
     indicator_engine: IndicatorEngine,
 ) -> None:
+    latency = LatencyStats("crypto tick latency", logger)
     async for price in stream:
+        started_at_ns = perf_counter_ns()
         await market_state.update_crypto_price(price)
         await indicator_engine.on_crypto_price(price)
+        latency.record_ns(started_at_ns)
 
 
 async def crypto_ohlcv_loop(
