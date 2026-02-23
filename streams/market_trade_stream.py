@@ -112,7 +112,10 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                     logger.info("connected market trade websocket")
                     heartbeat_task = asyncio.create_task(self._heartbeat(ws, ws_lock))
                     try:
-                        await self._receive_message(ws)
+                        async for raw in ws:
+                            if raw == "PONG":
+                                continue
+                            self._handle_message(raw)
                     finally:
                         heartbeat_task.cancel()
                         await asyncio.gather(heartbeat_task, return_exceptions=True)
@@ -124,29 +127,25 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                 logger.error("disconnected market trade websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
-    async def _receive_message(self, ws: ClientConnection) -> None:
-        async for raw in ws:
-            if raw == "PONG":
-                continue
+    def _handle_message(self, raw: str | bytes) -> None:
+        try:
+            message = orjson.loads(raw)
+        except (TypeError, orjson.JSONDecodeError):
+            return
+        if not isinstance(message, dict):
+            return
 
-            try:
-                message = orjson.loads(raw)
-            except (TypeError, orjson.JSONDecodeError):
-                return None
-            if not isinstance(message, dict):
-                continue
+        if message.get("event_type") == "order":
+            logger.debug("%r", message)
+            order_event = _build_order_event(message)
+            if order_event is not None:
+                self._enqueue(order_event)
 
-            if message.get("event_type") == "order":
-                logger.debug("%r", message)
-                order_event = _build_order_event(message)
-                if order_event is not None:
-                    self._enqueue(order_event)
-
-            if message.get("event_type") == "trade":
-                logger.debug("%r", message)
-                trade_event = _build_trade_event(message, self._proxy_wallet)
-                if trade_event is not None:
-                    self._enqueue(trade_event)
+        if message.get("event_type") == "trade":
+            logger.debug("%r", message)
+            trade_event = _build_trade_event(message, self._proxy_wallet)
+            if trade_event is not None:
+                self._enqueue(trade_event)
 
     async def _heartbeat(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:
         try:

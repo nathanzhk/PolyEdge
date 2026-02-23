@@ -39,13 +39,13 @@ class CryptoPriceStream:
                 async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
                     logger.info("connected crypto price websocket: %s", self._symbol.upper())
                     async for raw in ws:
+                        recv_ts_ms = now_ts_ms()
+                        if not self._advance_bucket(recv_ts_ms):
+                            continue
                         message = self._parse_message(raw)
                         if message is None:
                             continue
-                        ts_ms = now_ts_ms()
-                        if not self._advance_bucket(ts_ms):
-                            continue
-                        event = self._build_event(message, ts_ms)
+                        event = self._build_event(message, recv_ts_ms)
                         if event is None:
                             continue
                         yield event

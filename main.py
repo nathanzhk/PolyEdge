@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from dotenv import load_dotenv
 
@@ -19,6 +20,9 @@ async def run() -> None:
     load_dotenv()
     configure_logging()
 
+    market_logger = get_logger("MARKET STATE")
+    market_logger.setLevel(logging.INFO)
+
     logger.info("initializing trade clients")
     maker = await asyncio.to_thread(MakerTradeClient)
     taker = await asyncio.to_thread(TakerTradeClient)
@@ -26,9 +30,9 @@ async def run() -> None:
 
     logger.info("starting market price, market trade, and crypto price streams")
     runner = Runner(
-        market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=100),
+        market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=10),
         market_trade_stream=MarketTradeStream(maker.credentials),
-        crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=20),
+        crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=10),
         strategy=LoggingStrategy(),
         execution_engine=ExecutionEngine(maker, taker),
     )

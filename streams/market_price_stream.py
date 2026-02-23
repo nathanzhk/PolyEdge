@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
 from utils.logger import get_logger
-from utils.time import sleep_until
+from utils.time import now_ts_ms, sleep_until
 
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
@@ -102,7 +102,13 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                     heartbeat_task = asyncio.create_task(self._heartbeat(ws, ws_lock))
                     lifecycle_task = asyncio.create_task(self._lifecycle(ws, ws_lock))
                     try:
-                        await self._receive_message(ws)
+                        async for raw in ws:
+                            if raw == "PONG":
+                                continue
+                            recv_ts_ms = now_ts_ms()
+                            if not self._advance_bucket(recv_ts_ms):
+                                continue
+                            self._handle_message(raw)
                     finally:
                         heartbeat_task.cancel()
                         lifecycle_task.cancel()
@@ -115,37 +121,31 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                 logger.error("disconnected market price websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
-    async def _receive_message(self, ws: ClientConnection) -> None:
-        async for raw in ws:
-            if raw == "PONG":
-                continue
+    def _handle_message(self, raw: str | bytes) -> None:
+        try:
+            message = orjson.loads(raw)
+        except (TypeError, orjson.JSONDecodeError):
+            return
+        if not isinstance(message, dict) or message.get("event_type") != "price_change":
+            return
 
-            try:
-                message = orjson.loads(raw)
-            except (TypeError, orjson.JSONDecodeError):
-                return None
-            if not isinstance(message, dict) or message.get("event_type") != "price_change":
-                continue
+        try:
+            ts_ms = int(message["timestamp"])
+        except (KeyError, TypeError, ValueError):
+            return
 
-            try:
-                ts_ms = int(message["timestamp"])
-            except (KeyError, TypeError, ValueError):
-                continue
+        market = self._market
+        if market is None:
+            return
 
-            market = self._market
-            if market is None:
-                return
+        start_ts_ms, end_ts_ms = market.start_ts_ms, market.end_ts_ms
+        if ts_ms < start_ts_ms - _ACTIVATE_BEFORE_MS or ts_ms > end_ts_ms:
+            return
 
-            start_ts_ms, end_ts_ms = market.start_ts_ms, market.end_ts_ms
-            if ts_ms < start_ts_ms - _ACTIVATE_BEFORE_MS or ts_ms > end_ts_ms:
-                continue
-            if not self._advance_bucket(ts_ms):
-                continue
-
-            event = _build_event(message, market, ts_ms)
-            if event is None:
-                continue
-            self._set_latest(event)
+        event = _build_event(message, market, ts_ms)
+        if event is None:
+            return
+        self._set_latest(event)
 
     def _advance_bucket(self, ts_ms: int) -> bool:
         if ts_ms < self._next_bucket_ts_ms:
