@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
-from warnings import deprecated
 
 import orjson
 from websockets.asyncio.client import connect
@@ -12,6 +11,7 @@ from websockets.exceptions import ConnectionClosed
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from utils.logger import get_logger
+from utils.time import now_ts_ms
 
 _BASE_URL = "wss://stream.binance.com:443/ws"
 
@@ -20,15 +20,14 @@ _RECONNECT_DELAY_S = 2
 logger = get_logger("CRYPTO STREAM")
 
 
-@deprecated("")
-class CryptoTradeStream:
+class CryptoPriceStream:
     def __init__(self, symbol: str = "btcusdt", interval_ms: int = 100) -> None:
         if interval_ms <= 0:
             raise ValueError("interval_ms must be greater than 0")
         self._symbol = symbol.lower()
         self._interval_ms = interval_ms
         self._next_bucket_ts_ms = 0
-        self._ws_url = f"{_BASE_URL}/{self._symbol}@aggTrade"
+        self._ws_url = f"{_BASE_URL}/{self._symbol}@bookTicker"
 
     def __aiter__(self) -> AsyncIterator[CryptoPriceEvent]:
         return self._stream()
@@ -43,8 +42,8 @@ class CryptoTradeStream:
                         message = self._parse_message(raw)
                         if message is None:
                             continue
-                        ts_ms = self._message_ts_ms(message)
-                        if ts_ms is None or not self._advance_bucket(ts_ms):
+                        ts_ms = now_ts_ms()
+                        if not self._advance_bucket(ts_ms):
                             continue
                         event = self._build_event(message, ts_ms)
                         if event is None:
@@ -59,22 +58,22 @@ class CryptoTradeStream:
             message = orjson.loads(raw)
         except (TypeError, orjson.JSONDecodeError):
             return None
-        if not isinstance(message, dict) or message.get("e") != "aggTrade":
+        if not isinstance(message, dict):
+            return None
+        if "s" not in message or "b" not in message or "a" not in message:
             return None
         return message
 
-    def _message_ts_ms(self, message: dict[str, Any]) -> int | None:
-        try:
-            return int(message["T"])
-        except (KeyError, TypeError, ValueError):
-            return None
-
     def _build_event(self, message: dict[str, Any], ts_ms: int) -> CryptoPriceEvent | None:
         try:
+            best_bid = float(message["b"])
+            best_ask = float(message["a"])
             return CryptoPriceEvent(
                 ts_ms=ts_ms,
                 symbol=str(message["s"]).upper(),
-                price=round(float(message["p"]), 3),
+                price=round((best_bid + best_ask) / 2, 3),
+                best_bid=round(best_bid, 3),
+                best_ask=round(best_ask, 3),
             )
         except (KeyError, TypeError, ValueError):
             return None
@@ -89,7 +88,7 @@ class CryptoTradeStream:
 class CryptoOHLCVStream:
     def __init__(self, symbol: str = "btcusdt", interval: str = "1s") -> None:
         self._symbol = symbol.lower()
-        self._es_url = f"{_BASE_URL}/{self._symbol}@kline_{interval}"
+        self._ws_url = f"{_BASE_URL}/{self._symbol}@kline_{interval}"
 
     def __aiter__(self) -> AsyncIterator[CryptoOHLCVEvent]:
         return self._stream()
@@ -98,7 +97,7 @@ class CryptoOHLCVStream:
         while True:
             try:
                 logger.info("connecting crypto ohlcv websocket: %s", self._symbol.upper())
-                async with connect(self._es_url, ping_interval=20, ping_timeout=20) as ws:
+                async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
                     logger.info("connected crypto ohlcv websocket: %s", self._symbol.upper())
                     async for raw in ws:
                         message = self._parse_message(raw)
