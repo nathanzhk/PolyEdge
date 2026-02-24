@@ -25,7 +25,7 @@ async def market_price_loop(
     stream: AsyncIterable[MarketPriceEvent],
     market_state: MarketState,
 ) -> None:
-    latency = LatencyStats("market tick latency", logger)
+    latency = LatencyStats("market tick", logger)
     async for price in stream:
         started_at_ns = perf_counter_ns()
         await market_state.update_market_price(price)
@@ -45,7 +45,7 @@ async def crypto_price_loop(
     market_state: MarketState,
     indicator_engine: IndicatorEngine,
 ) -> None:
-    latency = LatencyStats("crypto tick latency", logger)
+    latency = LatencyStats("crypto tick", logger)
     async for price in stream:
         started_at_ns = perf_counter_ns()
         await market_state.update_crypto_price(price)

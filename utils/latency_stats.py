@@ -41,15 +41,20 @@ class LatencyStats:
             return
         samples = sorted(self._samples_ms)
         count = len(samples)
-        msg_interval_ms = (now_ns - self._window_started_at_ns) / count / NS_PER_MS
+        window_s = (now_ns - self._window_started_at_ns) / NS_PER_SECOND
+        msg_interval_ms = window_s * 1000 / count
         avg_ms = sum(samples) / count
         p95_ms = samples[_percentile_index(count, 0.95)]
         p99_ms = samples[_percentile_index(count, 0.99)]
         max_ms = samples[-1]
         self._logger.info(
-            "%s: cnt=%d intv=%.3fms avg=%.3fms p95=%.3fms p99=%.3fms max=%.3fms",
+            (
+                "%s latency stats: cnt=%d cnt/s=%.1f intv=%.3fms "
+                "avg=%.3fms p95=%.3fms p99=%.3fms max=%.3fms"
+            ),
             self._name,
             count,
+            count / window_s,
             msg_interval_ms,
             avg_ms,
             p95_ms,

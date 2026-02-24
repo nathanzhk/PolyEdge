@@ -13,6 +13,7 @@ from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
+from utils.stream_stats import StreamStats
 from utils.time import now_ts_ms
 
 _BASE_URL = "wss://stream.binance.com:443/ws"
@@ -30,7 +31,8 @@ class CryptoPriceStream:
         self._ws_url = f"{_BASE_URL}/{self._symbol}@bookTicker"
         self._interval_ms = interval_ms
         self._next_bucket_ts_ms = 0
-        self._parse_latency = LatencyStats("crypto price parse latency", logger)
+        self._raw_stats = StreamStats("crypto price stream", logger)
+        self._parse_latency = LatencyStats("crypto price parse", logger)
 
     def __aiter__(self) -> AsyncIterator[CryptoPriceEvent]:
         return self._stream()
@@ -42,17 +44,22 @@ class CryptoPriceStream:
                 async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
                     logger.info("connected crypto price websocket: %s", self._symbol.upper())
                     async for raw in ws:
+                        self._raw_stats.record_raw()
                         recv_ts_ms = now_ts_ms()
                         if not self._advance_bucket(recv_ts_ms):
+                            self._raw_stats.record_bucket_drop()
                             continue
                         started_at_ns = perf_counter_ns()
                         message = self._parse_message(raw)
                         self._parse_latency.record_ns(started_at_ns)
                         if message is None:
+                            self._raw_stats.record_parse_drop()
                             continue
                         event = self._build_event(message, recv_ts_ms)
                         if event is None:
+                            self._raw_stats.record_build_drop()
                             continue
+                        self._raw_stats.record_event()
                         yield event
             except (ConnectionClosed, ConnectionError, OSError) as e:
                 logger.error("disconnected crypto price websocket: %s", e)

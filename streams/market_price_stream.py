@@ -13,6 +13,7 @@ from models.market import Market
 from streams.market_price_event import MarketPriceEvent
 from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
+from utils.stream_stats import StreamStats
 from utils.time import now_ts_ms, sleep_until
 
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -46,7 +47,8 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_error: BaseException | None = None
         self._latest_event: asyncio.Queue[_LatestEvent] = asyncio.Queue(maxsize=1)
-        self._parse_latency = LatencyStats("market price parse latency", logger)
+        self._raw_stats = StreamStats("market price stream", logger)
+        self._parse_latency = LatencyStats("market price parse", logger)
 
     def __aiter__(self) -> Self:
         self._ensure_stream_task()
@@ -106,10 +108,13 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                     lifecycle_task = asyncio.create_task(self._lifecycle(ws, ws_lock))
                     try:
                         async for raw in ws:
+                            self._raw_stats.record_raw()
                             if raw == "PONG":
+                                self._raw_stats.record_pong()
                                 continue
                             recv_ts_ms = now_ts_ms()
                             if not self._advance_bucket(recv_ts_ms):
+                                self._raw_stats.record_bucket_drop()
                                 continue
                             started_at_ns = perf_counter_ns()
                             self._handle_message(raw)
@@ -130,27 +135,37 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
         try:
             message = orjson.loads(raw)
         except (TypeError, orjson.JSONDecodeError):
+            self._raw_stats.record_parse_drop()
             return
-        if not isinstance(message, dict) or message.get("event_type") != "price_change":
+        if not isinstance(message, dict):
+            self._raw_stats.record_parse_drop()
+            return
+        if message.get("event_type") != "price_change":
+            self._raw_stats.record_filter_drop()
             return
 
         try:
             ts_ms = int(message["timestamp"])
         except (KeyError, TypeError, ValueError):
+            self._raw_stats.record_parse_drop()
             return
 
         market = self._market
         if market is None:
+            self._raw_stats.record_filter_drop()
             return
 
         start_ts_ms, end_ts_ms = market.start_ts_ms, market.end_ts_ms
         if ts_ms < start_ts_ms - _ACTIVATE_BEFORE_MS or ts_ms > end_ts_ms:
+            self._raw_stats.record_filter_drop()
             return
 
         event = _build_event(message, market, ts_ms)
         if event is None:
+            self._raw_stats.record_build_drop()
             return
         self._set_latest(event)
+        self._raw_stats.record_event()
 
     def _advance_bucket(self, ts_ms: int) -> bool:
         if ts_ms < self._next_bucket_ts_ms:
@@ -211,7 +226,10 @@ def _build_event(data: dict[str, Any], market: Market, ts_ms: int) -> MarketPric
     ask_yes_raw: str | None = None
     bid_no_raw: str | None = None
     ask_no_raw: str | None = None
-    for price_change in data.get("price_changes", []):
+    price_changes = data.get("price_changes", [])
+    if not isinstance(price_changes, list):
+        return None
+    for price_change in price_changes:
         if not isinstance(price_change, dict):
             continue
         asset_id = price_change.get("asset_id")
@@ -223,11 +241,14 @@ def _build_event(data: dict[str, Any], market: Market, ts_ms: int) -> MarketPric
             ask_no_raw = price_change.get("best_ask")
     if bid_yes_raw is None or ask_yes_raw is None or bid_no_raw is None or ask_no_raw is None:
         return None
-    return MarketPriceEvent(
-        ts_ms=ts_ms,
-        market=market,
-        bid_yes=round(float(bid_yes_raw), 3),
-        ask_yes=round(float(ask_yes_raw), 3),
-        bid_no=round(float(bid_no_raw), 3),
-        ask_no=round(float(ask_no_raw), 3),
-    )
+    try:
+        return MarketPriceEvent(
+            ts_ms=ts_ms,
+            market=market,
+            bid_yes=round(float(bid_yes_raw), 3),
+            ask_yes=round(float(ask_yes_raw), 3),
+            bid_no=round(float(bid_no_raw), 3),
+            ask_no=round(float(ask_no_raw), 3),
+        )
+    except (TypeError, ValueError):
+        return None
