@@ -11,9 +11,8 @@ from websockets.exceptions import ConnectionClosed
 
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
-from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
-from utils.stream_stats import StreamStats
+from utils.stats import LatencyStats, StreamStats
 from utils.time import now_ts_ms, sleep_until
 
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"

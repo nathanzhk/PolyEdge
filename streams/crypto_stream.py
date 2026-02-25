@@ -11,9 +11,8 @@ from websockets.exceptions import ConnectionClosed
 
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
-from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
-from utils.stream_stats import StreamStats
+from utils.stats import LatencyStats, StreamStats
 from utils.time import now_ts_ms
 
 _BASE_URL = "wss://stream.binance.com:443/ws"

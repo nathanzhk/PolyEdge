@@ -16,8 +16,8 @@ from streams.market_trade_event import (
     MarketTradeEvent,
     MarketTradeEventStatus,
 )
-from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
+from utils.stats import LatencyStats
 
 _WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
