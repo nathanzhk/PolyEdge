@@ -32,7 +32,7 @@ class CryptoPriceStream:
         self._interval_ms = interval_ms
         self._next_bucket_ts_ms = 0
         self._raw_stats = StreamStats("crypto price stream", logger)
-        self._parse_latency = LatencyStats("crypto price parse", logger)
+        self._latency_stats = LatencyStats("crypto price parse", logger)
 
     def __aiter__(self) -> AsyncIterator[CryptoPriceEvent]:
         return self._stream()
@@ -49,9 +49,9 @@ class CryptoPriceStream:
                         if not self._advance_bucket(recv_ts_ms):
                             self._raw_stats.record_bucket_drop()
                             continue
-                        started_at_ns = perf_counter_ns()
+                        started_at_ns = perf_counter_ns() if self._latency_stats.enabled else 0
                         message = self._parse_message(raw)
-                        self._parse_latency.record_ns(started_at_ns)
+                        self._latency_stats.record_ns(started_at_ns)
                         if message is None:
                             self._raw_stats.record_parse_drop()
                             continue

@@ -60,7 +60,7 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
         self._stopping = asyncio.Event()
         self._stream_task: asyncio.Task[None] | None = None
         self._stream_error: BaseException | None = None
-        self._parse_latency = LatencyStats("market trade parse latency", logger)
+        self._latency_stats = LatencyStats("market trade parse latency", logger)
 
     def __aiter__(self) -> Self:
         self._ensure_stream_task()
@@ -118,9 +118,9 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                         async for raw in ws:
                             if raw == "PONG":
                                 continue
-                            started_at_ns = perf_counter_ns()
+                            started_at_ns = perf_counter_ns() if self._latency_stats.enabled else 0
                             self._handle_message(raw)
-                            self._parse_latency.record_ns(started_at_ns)
+                            self._latency_stats.record_ns(started_at_ns)
                     finally:
                         heartbeat_task.cancel()
                         await asyncio.gather(heartbeat_task, return_exceptions=True)

@@ -48,7 +48,7 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
         self._stream_error: BaseException | None = None
         self._latest_event: asyncio.Queue[_LatestEvent] = asyncio.Queue(maxsize=1)
         self._raw_stats = StreamStats("market price stream", logger)
-        self._parse_latency = LatencyStats("market price parse", logger)
+        self._latency_stats = LatencyStats("market price parse", logger)
 
     def __aiter__(self) -> Self:
         self._ensure_stream_task()
@@ -116,9 +116,9 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
                             if not self._advance_bucket(recv_ts_ms):
                                 self._raw_stats.record_bucket_drop()
                                 continue
-                            started_at_ns = perf_counter_ns()
+                            started_at_ns = perf_counter_ns() if self._latency_stats.enabled else 0
                             self._handle_message(raw)
-                            self._parse_latency.record_ns(started_at_ns)
+                            self._latency_stats.record_ns(started_at_ns)
                     finally:
                         heartbeat_task.cancel()
                         lifecycle_task.cancel()
