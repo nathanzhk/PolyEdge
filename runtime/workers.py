@@ -25,11 +25,11 @@ async def market_price_loop(
     stream: AsyncIterable[MarketPriceEvent],
     market_state: MarketState,
 ) -> None:
-    latency = LatencyStats("market tick", logger)
+    latency_stats = LatencyStats("market tick", logger)
     async for price in stream:
-        started_at_ns = perf_counter_ns()
+        started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
         await market_state.update_market_price(price)
-        latency.record_ns(started_at_ns)
+        latency_stats.record_ns(started_at_ns)
 
 
 async def market_trade_loop(
@@ -45,12 +45,12 @@ async def crypto_price_loop(
     market_state: MarketState,
     indicator_engine: IndicatorEngine,
 ) -> None:
-    latency = LatencyStats("crypto tick", logger)
+    latency_stats = LatencyStats("crypto tick", logger)
     async for price in stream:
-        started_at_ns = perf_counter_ns()
+        started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
         await market_state.update_crypto_price(price)
         await indicator_engine.on_crypto_price(price)
-        latency.record_ns(started_at_ns)
+        latency_stats.record_ns(started_at_ns)
 
 
 async def crypto_ohlcv_loop(

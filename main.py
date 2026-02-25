@@ -40,7 +40,10 @@ async def run() -> None:
 
 
 def main() -> None:
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except KeyboardInterrupt:
+        logger.info("shutdown")
 
 
 if __name__ == "__main__":
