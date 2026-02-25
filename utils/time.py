@@ -15,6 +15,11 @@ def now_ts_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
+def iso_to_ms(iso_str: str) -> int:
+    dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    return int(dt.timestamp() * 1000)
+
+
 def format_ts_ms(ts_ms: int) -> str:
     dt = datetime.fromtimestamp(ts_ms / 1_000)
     return dt.strftime(DATE_TIME_MS_FORMAT)[:-3]

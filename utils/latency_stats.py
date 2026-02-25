@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from time import perf_counter_ns
 
+from utils.env import env_bool
+
 DEFAULT_REPORT_INTERVAL_S = 5.0
 NS_PER_SECOND = 1_000_000_000
 NS_PER_MS = 1_000_000
@@ -15,6 +17,7 @@ class LatencyStats:
         logger: logging.Logger,
         report_interval_s: float = DEFAULT_REPORT_INTERVAL_S,
     ) -> None:
+        self.enabled = env_bool("ENABLE_STATS")
         self._name = name
         self._logger = logger
         self._samples_ms: list[float] = []
@@ -24,6 +27,8 @@ class LatencyStats:
         self._next_report_at_ns = now_ns + self._report_interval_ns
 
     def record_ns(self, started_at_ns: int) -> None:
+        if not self.enabled:
+            return
         self._record_ms((perf_counter_ns() - started_at_ns) / NS_PER_MS)
 
     def _record_ms(self, elapsed_ms: float) -> None:

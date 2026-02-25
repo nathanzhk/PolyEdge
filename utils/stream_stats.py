@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from time import perf_counter_ns
 
+from utils.env import env_bool
+
 DEFAULT_REPORT_INTERVAL_S = 5.0
 NS_PER_SECOND = 1_000_000_000
 
@@ -14,6 +16,7 @@ class StreamStats:
         logger: logging.Logger,
         report_interval_s: float = DEFAULT_REPORT_INTERVAL_S,
     ) -> None:
+        self.enabled = env_bool("ENABLE_STATS")
         self._name = name
         self._logger = logger
         self._report_interval_ns = int(report_interval_s * NS_PER_SECOND)
@@ -23,29 +26,43 @@ class StreamStats:
         self._reset()
 
     def record_raw(self) -> None:
+        if not self.enabled:
+            return
         self._raw += 1
 
     def record_pong(self) -> None:
+        if not self.enabled:
+            return
         self._pong += 1
         self._maybe_report()
 
     def record_bucket_drop(self) -> None:
+        if not self.enabled:
+            return
         self._bucket_drop += 1
         self._maybe_report()
 
     def record_parse_drop(self) -> None:
+        if not self.enabled:
+            return
         self._parse_drop += 1
         self._maybe_report()
 
     def record_filter_drop(self) -> None:
+        if not self.enabled:
+            return
         self._filter_drop += 1
         self._maybe_report()
 
     def record_build_drop(self) -> None:
+        if not self.enabled:
+            return
         self._build_drop += 1
         self._maybe_report()
 
     def record_event(self) -> None:
+        if not self.enabled:
+            return
         self._event += 1
         self._maybe_report()
 
