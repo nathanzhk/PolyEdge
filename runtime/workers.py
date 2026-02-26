@@ -15,8 +15,8 @@ from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
 from streams.market_trade_stream import MarketUserEvent
 from trade.execution_engine import ExecutionEngine
-from utils.latency_stats import LatencyStats
 from utils.logger import get_logger
+from utils.stats import LatencyStats
 
 logger = get_logger("RUNTIME")
 
