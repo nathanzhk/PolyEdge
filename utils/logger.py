@@ -7,7 +7,7 @@ from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
-from utils.time import DATE_TIME_MS_FORMAT
+from utils.time import fmt_ts_s
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
@@ -32,8 +32,7 @@ _CONSOLE_HANDLER: logging.Handler | None = None
 
 class _Formatter(logging.Formatter):
     def formatTime(self, record, datefmt: str | None = None):
-        record_time = datetime.fromtimestamp(record.created)
-        return record_time.strftime(DATE_TIME_MS_FORMAT)[:-3]
+        return fmt_ts_s(record.created, fmt="datetime_ms")
 
 
 class _ColorFormatter(_Formatter):
