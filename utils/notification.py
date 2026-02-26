@@ -1,12 +1,7 @@
-import os
-
 import requests
 
+from utils.env import Env
 from utils.time import fmt_ts_ms
-
-_CHAT_ID = "895951888"
-_BOT_KEY = os.getenv("TELEGRAM_BOT_KEY", "")
-_BASE_URL = f"https://api.telegram.org/bot{_BOT_KEY}"
 
 
 def send_trade(market_start_ms, market_end_ms, side, token, shares, price, amount=None, pnl=None):
@@ -27,10 +22,10 @@ def send_trade(market_start_ms, market_end_ms, side, token, shares, price, amoun
 
 def send_message(message: list[str]) -> bool:
     response = requests.post(
-        f"{_BASE_URL}/sendMessage",
+        f"{Env.TELEGRAM_API_BASE_URL}/bot{Env.TELEGRAM_BOT_KEY}/sendMessage",
         json={
             "parse_mode": "HTML",
-            "chat_id": _CHAT_ID,
+            "chat_id": Env.TELEGRAM_CHAT_ID,
             "text": "\n".join(f"<code>{line}</code>" for line in message),
         },
     )

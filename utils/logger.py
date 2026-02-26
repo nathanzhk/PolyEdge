@@ -1,12 +1,12 @@
 import atexit
 import logging
-import os
 import queue
 import sys
 from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
+from utils.env import Env
 from utils.time import fmt_ts_s
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -69,9 +69,7 @@ def configure_logging() -> None:
 
     _CONSOLE_HANDLER = logging.StreamHandler(sys.stderr)
     _CONSOLE_HANDLER.setFormatter(_ColorFormatter(_LOG_FORMAT))
-    _CONSOLE_HANDLER.setLevel(
-        logging.getLevelNamesMapping().get(os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
-    )
+    _CONSOLE_HANDLER.setLevel(logging.getLevelNamesMapping().get(Env.LOG_LEVEL, logging.INFO))
 
     _CONFIGURED = True
     for logger in _LOGGERS.values():

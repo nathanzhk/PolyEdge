@@ -2,16 +2,18 @@ import orjson
 import requests
 
 from models.metadata import MarketMetadata
+from utils.env import Env
 from utils.logger import get_logger
-
-_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 
 logger = get_logger("MARKET API")
 
 
 def get_market_by_slug(slug: str) -> MarketMetadata | None:
     try:
-        resp = requests.get(f"{_GAMMA_BASE_URL}/markets/slug/{slug}", timeout=(1, 2))
+        resp = requests.get(
+            f"{Env.POLYMARKET_GAMMA_BASE_URL}/markets/slug/{slug}",
+            timeout=(1, 2),
+        )
         resp.raise_for_status()
     except requests.RequestException as e:
         logger.error("get market failed: %s", e)

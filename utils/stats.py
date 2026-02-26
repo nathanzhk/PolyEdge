@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from time import perf_counter_ns
 
-from utils.env import env_bool
+from utils.env import Env
 
 NS_PER_S = 1_000_000_000
 NS_PER_MS = 1_000_000
@@ -18,7 +18,7 @@ class LatencyStats:
         logger: logging.Logger,
         report_interval_s: float = DEFAULT_REPORT_INTERVAL_S,
     ) -> None:
-        self.enabled = env_bool("ENABLE_STATS")
+        self.enabled = Env.ENABLE_STATS
         self._name = name
         self._logger = logger
         self._samples_ms: list[float] = []
@@ -80,7 +80,7 @@ class StreamStats:
         logger: logging.Logger,
         report_interval_s: float = DEFAULT_REPORT_INTERVAL_S,
     ) -> None:
-        self.enabled = env_bool("ENABLE_STATS")
+        self.enabled = Env.ENABLE_STATS
         self._name = name
         self._logger = logger
         self._report_interval_ns = int(report_interval_s * NS_PER_S)
