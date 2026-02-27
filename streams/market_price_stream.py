@@ -11,11 +11,10 @@ from websockets.exceptions import ConnectionClosed
 
 from models.market import Market
 from streams.market_price_event import MarketPriceEvent
+from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats, StreamStats
 from utils.time import now_ts_ms, sleep_until
-
-_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
 _SWITCH_BEFORE_END_S = 5
 _ACTIVATE_BEFORE_MS = 2_000
@@ -98,7 +97,11 @@ class MarketPriceStream(AsyncIterator[MarketPriceEvent]):
             try:
                 logger.info("connecting market price websocket")
                 async with connect(
-                    _WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
+                    f"{Env.POLYMARKET_WS_BASE_URL}/market",
+                    ping_interval=20,
+                    ping_timeout=20,
+                    max_queue=1024,
+                    max_size=None,
                 ) as ws:
                     ws_lock = asyncio.Lock()
                     await _initial_subscribe(ws, self._market)

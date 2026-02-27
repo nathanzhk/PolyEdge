@@ -11,11 +11,10 @@ from websockets.exceptions import ConnectionClosed
 
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
+from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats, StreamStats
 from utils.time import now_ts_ms
-
-_BASE_URL = "wss://stream.binance.com:443/ws"
 
 _RECONNECT_DELAY_S = 2
 
@@ -27,7 +26,7 @@ class CryptoPriceStream:
         if interval_ms <= 0:
             raise ValueError("interval_ms must be greater than 0")
         self._symbol = symbol.lower()
-        self._ws_url = f"{_BASE_URL}/{self._symbol}@bookTicker"
+        self._ws_url = f"{Env.BINANCE_WS_BASE_URL}/{self._symbol}@bookTicker"
         self._interval_ms = interval_ms
         self._next_bucket_ts_ms = 0
         self._raw_stats = StreamStats("crypto price stream", logger)
@@ -99,7 +98,7 @@ class CryptoPriceStream:
 class CryptoOHLCVStream:
     def __init__(self, symbol: str = "btcusdt", interval: str = "1s") -> None:
         self._symbol = symbol.lower()
-        self._ws_url = f"{_BASE_URL}/{self._symbol}@kline_{interval}"
+        self._ws_url = f"{Env.BINANCE_WS_BASE_URL}/{self._symbol}@kline_{interval}"
 
     def __aiter__(self) -> AsyncIterator[CryptoOHLCVEvent]:
         return self._stream()

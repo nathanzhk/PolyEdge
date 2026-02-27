@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from collections.abc import AsyncIterator
 from time import perf_counter_ns
 from typing import Any, NoReturn, Self
@@ -16,10 +15,9 @@ from streams.market_trade_event import (
     MarketTradeEvent,
     MarketTradeEventStatus,
 )
+from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats
-
-_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/user"
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
@@ -52,10 +50,7 @@ type _QueuedMessage = MarketUserEvent | _EndOfStream
 class MarketTradeStream(AsyncIterator[MarketUserEvent]):
     def __init__(self, credentials: ApiCreds) -> None:
         self._credentials = credentials
-        proxy_wallet = os.getenv("POLYMARKET_PROXY_WALLET")
-        if not proxy_wallet:
-            raise ValueError("missing POLYMARKET_PROXY_WALLET")
-        self._proxy_wallet = proxy_wallet
+        self._proxy_wallet = Env.POLYMARKET_PROXY_WALLET
         self._messages: asyncio.Queue[_QueuedMessage] = asyncio.Queue()
         self._stopping = asyncio.Event()
         self._stream_task: asyncio.Task[None] | None = None
@@ -108,7 +103,11 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
             try:
                 logger.info("connecting market trade websocket")
                 async with connect(
-                    _WS_URL, ping_interval=20, ping_timeout=20, max_queue=1024, max_size=None
+                    f"{Env.POLYMARKET_WS_BASE_URL}/user",
+                    ping_interval=20,
+                    ping_timeout=20,
+                    max_queue=1024,
+                    max_size=None,
                 ) as ws:
                     ws_lock = asyncio.Lock()
                     await _initial_subscribe(ws, self._credentials)
