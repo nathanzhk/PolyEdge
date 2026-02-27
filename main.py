@@ -1,8 +1,6 @@
 import asyncio
 import logging
 
-from dotenv import load_dotenv
-
 from models.btc_market import BTC5mMarket
 from runtime.runner import Runner
 from strategies.logging_strategy import LoggingStrategy
@@ -11,13 +9,14 @@ from streams.market_price_stream import MarketPriceStream
 from streams.market_trade_stream import MarketTradeStream
 from trade.execution_engine import ExecutionEngine
 from trade.trade_client import MakerTradeClient, TakerTradeClient
+from utils.env import Env
 from utils.logger import configure_logging, get_logger
 
 logger = get_logger("MAIN")
 
 
 async def run() -> None:
-    load_dotenv()
+    Env.load()
     configure_logging()
 
     market_logger = get_logger("MARKET STATE")

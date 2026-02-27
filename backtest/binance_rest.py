@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import requests
 
-_BASE_URL = "https://api.binance.com/api/v3"
+from utils.env import Env
 
 
 def fetch_ohlcv(
@@ -19,7 +19,7 @@ def fetch_ohlcv(
     cursor = start_time
     while cursor < end_time:
         response = requests.get(
-            f"{_BASE_URL}/klines",
+            f"{Env.BINANCE_API_BASE_URL}/klines",
             params={
                 "symbol": symbol,
                 "interval": interval,

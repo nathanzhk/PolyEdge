@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import os
 import time
 
 import requests
 
+from utils.env import Env
 from utils.time import iso_to_ms
 
-_BASE_URL = "https://api.polybacktest.com/v2"
-_API_KEY = os.getenv("POLY_BACKTEST_KEY", "")
-_AUTH = {"Authorization": f"Bearer {_API_KEY}"}
 _remaining = -1  # X-RateLimit-Remaining from last response
+
+
+def _auth() -> dict[str, str]:
+    return {"Authorization": f"Bearer {Env.POLY_BACKTEST_KEY}"}
 
 
 def _get(url: str, params: dict | None = None) -> dict | None:
@@ -20,7 +21,7 @@ def _get(url: str, params: dict | None = None) -> dict | None:
     while True:
         if _remaining == 0:
             time.sleep(1)
-        response = requests.get(url, headers=_AUTH, params=params, timeout=5)
+        response = requests.get(url, headers=_auth(), params=params, timeout=5)
         _remaining = int(response.headers["X-RateLimit-Remaining"])
         if response.status_code == 200:
             return response.json()
@@ -37,7 +38,10 @@ def get_market_by_slug(slug: str, coin: str = "btc") -> dict | None:
     Returns the market object with market_id, condition_id, winner,
     start_time, end_time, etc.  Returns None on failure.
     """
-    market = _get(f"{_BASE_URL}/markets/by-slug/{slug}", params={"coin": coin})
+    market = _get(
+        f"{Env.POLY_BACKTEST_BASE_URL}/markets/by-slug/{slug}",
+        params={"coin": coin},
+    )
     if not market:
         return None
     market["start_time"] = iso_to_ms(market["start_time"])
@@ -66,7 +70,7 @@ def _get_orderbook_by_market(market_id: int | str, coin: str) -> list[dict]:
     page_size = 1000
     while True:
         page_data = _get(
-            f"{_BASE_URL}/markets/{market_id}/snapshots",
+            f"{Env.POLY_BACKTEST_BASE_URL}/markets/{market_id}/snapshots",
             params={
                 "coin": coin,
                 "include_orderbook": "true",

@@ -1,4 +1,3 @@
-import os
 import time
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -17,6 +16,7 @@ from py_clob_client.order_builder.constants import BUY, SELL
 from models.market import Market, Token
 from models.market_order import MarketOrder
 from models.metadata import MarketOrderMetadata
+from utils.env import Env
 from utils.logger import get_logger
 
 TradeRole = Literal["maker", "taker"]
@@ -28,16 +28,10 @@ class TradeClient:
 
     def __init__(self) -> None:
         self.logger = get_logger(self.role.upper())
-        private_key = os.getenv("POLYMARKET_PRIVATE_KEY")
-        if not private_key:
-            raise ValueError("missing POLYMARKET_PRIVATE_KEY")
-        proxy_wallet = os.getenv("POLYMARKET_PROXY_WALLET")
-        if not proxy_wallet:
-            raise ValueError("missing POLYMARKET_PROXY_WALLET")
         self.client = ClobClient(
-            "https://clob.polymarket.com",
-            key=private_key,
-            funder=proxy_wallet,
+            Env.POLYMARKET_CLOB_BASE_URL,
+            key=Env.POLYMARKET_PRIVATE_KEY,
+            funder=Env.POLYMARKET_PROXY_WALLET,
             chain_id=137,
             signature_type=2,
         )
