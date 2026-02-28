@@ -219,7 +219,7 @@ class TradeClient:
             "matched_shares": round(float(data["size_matched"]), 6),
             "market_id": data["market"],
             "token_id": data["asset_id"],
-            "price": round(float(data["price"]), 2),
+            "price": round(float(data["price"]), 3),
         }
 
     @staticmethod
