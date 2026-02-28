@@ -39,7 +39,13 @@ class CryptoPriceStream:
         while True:
             try:
                 logger.info("connecting crypto price websocket: %s", self._symbol.upper())
-                async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
+                async with connect(
+                    self._ws_url,
+                    ping_interval=20,
+                    ping_timeout=5,
+                    max_queue=2048,
+                    max_size=None,
+                ) as ws:
                     logger.info("connected crypto price websocket: %s", self._symbol.upper())
                     async for raw in ws:
                         self._raw_stats.record_raw()
@@ -107,7 +113,13 @@ class CryptoOHLCVStream:
         while True:
             try:
                 logger.info("connecting crypto ohlcv websocket: %s", self._symbol.upper())
-                async with connect(self._ws_url, ping_interval=20, ping_timeout=20) as ws:
+                async with connect(
+                    self._ws_url,
+                    ping_interval=20,
+                    ping_timeout=5,
+                    max_queue=2048,
+                    max_size=None,
+                ) as ws:
                     logger.info("connected crypto ohlcv websocket: %s", self._symbol.upper())
                     async for raw in ws:
                         message = self._parse_message(raw)

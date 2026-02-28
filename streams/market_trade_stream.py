@@ -105,8 +105,8 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                 async with connect(
                     f"{Env.POLYMARKET_WS_BASE_URL}/user",
                     ping_interval=20,
-                    ping_timeout=20,
-                    max_queue=1024,
+                    ping_timeout=5,
+                    max_queue=2048,
                     max_size=None,
                 ) as ws:
                     ws_lock = asyncio.Lock()
