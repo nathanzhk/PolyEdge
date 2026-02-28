@@ -1,67 +1,70 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
+from dataclasses import dataclass, field
 from typing import Literal
 
 from models.market import Market, Token
-from models.market_order import OrderSide
+from trade.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 
 TradePurpose = Literal["increase", "reduce"]
-
-OrderStatus = Literal["PENDING", "MATCHED", "INVALID"]
-
-
-class ManagedOrderStatus(StrEnum):
-    PENDING_SUBMIT = "PENDING_SUBMIT"
-    SUBMIT_FAILED = "SUBMIT_FAILED"
-    PENDING_MATCH = "PENDING_MATCH"
-    MATCHED = "MATCHED"
-    PENDING_CANCEL = "PENDING_CANCEL"
-    CANCEL_FAILED = "CANCEL_FAILED"
-    CANCELED = "CANCELED"
-    UNKNOWN = "UNKNOWN"
-
-
-class ManagedTradeStatus(StrEnum):
-    PENDING = "PENDING"
-    SUCCESS = "SUCCESS"
-    FAILURE = "FAILURE"
 
 
 @dataclass(slots=True)
 class ManagedOrder:
     local_id: str
-    signal_id: str
     purpose: TradePurpose
+
     market: Market
     token: Token
-    side: OrderSide
-    ordered_shares: float
+
+    side: Side
     price: float
     as_maker: bool
     order_id: str | None
     created_ts_ms: int
     updated_ts_ms: int
     status: ManagedOrderStatus
+    ordered_shares: float
     off_chain_pending_shares: float = 0.0
     off_chain_matched_shares: float = 0.0
     off_chain_invalid_shares: float = 0.0
     replace_count: int = 0
     cancel_attempts: int = 0
     last_error: str | None = None
+    status_before_cancel: ManagedOrderStatus | None = None
+    trades: dict[str, ManagedTrade] = field(default_factory=dict)
 
     @property
-    def shares(self) -> float:
+    def total_shares(self) -> float:
         return self.ordered_shares
+
+    @property
+    def matching_shares(self) -> float:
+        return self.off_chain_pending_shares
 
     @property
     def matched_shares(self) -> float:
         return self.off_chain_matched_shares
 
     @property
-    def remaining_shares(self) -> float:
-        return self.off_chain_pending_shares
+    def cancelled_shares(self) -> float:
+        return self.off_chain_invalid_shares
+
+    @property
+    def is_settled(self) -> bool:
+        return self.matched_shares == self.settled_shares + self.settle_failed_shares
+
+    @property
+    def settled_shares(self) -> float:
+        return round(sum(trade.on_chain_success_shares for trade in self.trades.values()), 6)
+
+    @property
+    def has_settle_failed(self) -> bool:
+        return self.settle_failed_shares > 0
+
+    @property
+    def settle_failed_shares(self) -> float:
+        return round(sum(trade.on_chain_failure_shares for trade in self.trades.values()), 6)
 
 
 @dataclass(slots=True)
@@ -71,7 +74,7 @@ class ManagedTrade:
     market_id: str
     token_id: str
     shares: float
-    raw_status: str
+    raw_status: MarketTradeStatus
     status: ManagedTradeStatus
     created_ts_ms: int
     updated_ts_ms: int
@@ -86,19 +89,3 @@ class Position:
     shares: float = 0.0
     updated_ts_ms: int = 0
     source: Literal["local", "exchange"] = "local"
-
-
-@dataclass(slots=True, frozen=True)
-class TradeLatestState:
-    open_orders: tuple[ManagedOrder, ...]
-    positions: dict[str, Position]
-    unknown_order_count: int = 0
-
-    def position_shares(self, token: Token | None) -> float:
-        if token is None:
-            return 0.0
-        position = self.positions.get(token.id)
-        return 0.0 if position is None else position.shares
-
-    def has_open_signal(self, signal_id: str) -> bool:
-        return any(order.signal_id == signal_id for order in self.open_orders)

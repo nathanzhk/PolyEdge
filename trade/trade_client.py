@@ -14,8 +14,8 @@ from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
 from models.market import Market, Token
-from models.market_order import MarketOrder
-from models.metadata import MarketOrderMetadata
+from trade.enum import MarketOrderStatus, OrderType, Side
+from trade.market_order import MarketOrder
 from utils.env import Env
 from utils.logger import get_logger
 
@@ -90,7 +90,7 @@ class TradeClient:
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("get order failed: %s", self._error_message(e))
+            self.logger.error("get order failed: %s", _error_message(e))
             return None
 
         if not isinstance(resp, dict):
@@ -98,7 +98,7 @@ class TradeClient:
             return None
 
         try:
-            return MarketOrder.from_metadata(self._order_metadata(resp))
+            return _parse_market_order(resp)
         except (KeyError, TypeError, ValueError) as e:
             self.logger.error("invalid response: %s", e)
             return None
@@ -110,7 +110,7 @@ class TradeClient:
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("get orders failed: %s", self._error_message(e))
+            self.logger.error("get orders failed: %s", _error_message(e))
             return []
 
         if not isinstance(resp, list):
@@ -123,7 +123,7 @@ class TradeClient:
                 self.logger.error("invalid response: %r", item)
                 continue
             try:
-                orders.append(MarketOrder.from_metadata(self._order_metadata(item)))
+                orders.append(_parse_market_order(item))
             except (KeyError, TypeError, ValueError) as e:
                 self.logger.error("invalid response: %s", e)
         return orders
@@ -134,7 +134,7 @@ class TradeClient:
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("cancel order failed: %s", self._error_message(e))
+            self.logger.error("cancel order failed: %s", _error_message(e))
             return False
 
         success_list = resp.get("canceled", []) if isinstance(resp, dict) else []
@@ -158,7 +158,7 @@ class TradeClient:
             self.client.get_fee_rate_bps(token.id)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("warm up failed: %s", self._error_message(e))
+            self.logger.error("warm up failed: %s", _error_message(e))
 
     def _get_balance(self, params: BalanceAllowanceParams) -> float:
         resp = self.client.get_balance_allowance(params)
@@ -205,29 +205,8 @@ class TradeClient:
 
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("submit order failed: %s", self._error_message(e))
+            self.logger.error("submit order failed: %s", _error_message(e))
             return None
-
-    @staticmethod
-    def _order_metadata(data: Mapping[str, Any]) -> MarketOrderMetadata:
-        return {
-            "id": data["id"],
-            "side": data["side"],
-            "type": data["order_type"],
-            "status": data["status"],
-            "ordered_shares": round(float(data["original_size"]), 6),
-            "matched_shares": round(float(data["size_matched"]), 6),
-            "market_id": data["market"],
-            "token_id": data["asset_id"],
-            "price": round(float(data["price"]), 3),
-        }
-
-    @staticmethod
-    def _error_message(error: PolyApiException) -> str:
-        error_msg = error.error_msg
-        if isinstance(error_msg, dict):
-            error_msg = error_msg.get("error", error_msg)
-        return str(error_msg)
 
 
 class MakerTradeClient(TradeClient):
@@ -238,3 +217,24 @@ class MakerTradeClient(TradeClient):
 class TakerTradeClient(TradeClient):
     role: TradeRole = "taker"
     post_only = False
+
+
+def _parse_market_order(data: Mapping[str, Any]) -> MarketOrder:
+    return MarketOrder(
+        id=data["id"],
+        side=Side(data["side"]),
+        type=OrderType(data["order_type"]),
+        status=MarketOrderStatus(data["status"]),
+        ordered_shares=round(float(data["original_size"]), 6),
+        matched_shares=round(float(data["size_matched"]), 6),
+        market_id=data["market"],
+        token_id=data["asset_id"],
+        price=round(float(data["price"]), 3),
+    )
+
+
+def _error_message(error: PolyApiException) -> str:
+    error_msg = error.error_msg
+    if isinstance(error_msg, dict):
+        error_msg = error_msg.get("error", error_msg)
+    return str(error_msg)
