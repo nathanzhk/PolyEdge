@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from models.market import Token
+from markets.base import Token
 from strategies.context import PositionLatestState
 from strategies.strategy import ExecutionStyle, PositionTarget
 from streams.market_order_event import MarketOrderEvent, MarketOrderEventStatus

@@ -13,7 +13,7 @@ from py_clob_client.clob_types import (
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
-from models.market import Market, Token
+from markets.base import Market, Token
 from trade.enum import MarketOrderStatus, OrderType, Side
 from trade.market_order import MarketOrder
 from utils.env import Env

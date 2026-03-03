@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from models.market import Market, Token
+from markets.base import Market, Token
 from trade.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 
 TradePurpose = Literal["increase", "reduce"]
