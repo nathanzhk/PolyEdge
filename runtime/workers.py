@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import AsyncIterable
 from time import perf_counter_ns
 
@@ -9,7 +8,7 @@ from runtime.indicator_engine import IndicatorEngine
 from runtime.indicator_state import IndicatorState
 from runtime.market_state import MarketState
 from strategies.context import StrategyContext
-from strategies.strategy import Strategy, StrategyDecision
+from strategies.strategy import PositionTarget, Strategy
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
@@ -67,7 +66,7 @@ async def strategy_loop(
     market_state: MarketState,
     indicator_state: IndicatorState,
     strategy: Strategy,
-    latest_decision: asyncio.Queue[StrategyDecision],
+    latest_target: asyncio.Queue[PositionTarget],
     execution_engine: ExecutionEngine,
 ) -> None:
     while True:
@@ -75,34 +74,32 @@ async def strategy_loop(
         try:
             context = StrategyContext(
                 market=await market_state.latest_state(),
+                position=await execution_engine.latest_state(),
                 indicators=await indicator_state.latest_state(),
-                trade=await execution_engine.latest_state(),
             )
-            decision = strategy.on_market(context)
-            if inspect.isawaitable(decision):
-                decision = await decision
-            if decision is not None:
-                _set_latest_decision(latest_decision, decision)
+            target = strategy.on_market(context)
+            if target is not None:
+                _set_latest_target(latest_target, target)
         except Exception:
             logger.exception("strategy failed")
             raise
 
 
 async def execution_loop(
-    latest_decision: asyncio.Queue[StrategyDecision],
+    latest_target: asyncio.Queue[PositionTarget],
     execution_engine: ExecutionEngine,
     *,
     watch_orders: bool = True,
 ) -> None:
-    await execution_engine.run(latest_decision, watch_orders=watch_orders)
+    await execution_engine.run(latest_target, watch_orders=watch_orders)
 
 
-def _set_latest_decision(
-    latest_decision: asyncio.Queue[StrategyDecision], decision: StrategyDecision
+def _set_latest_target(
+    latest_target: asyncio.Queue[PositionTarget], target: PositionTarget
 ) -> None:
-    if latest_decision.full():
+    if latest_target.full():
         try:
-            latest_decision.get_nowait()
+            latest_target.get_nowait()
         except asyncio.QueueEmpty:
             pass
-    latest_decision.put_nowait(decision)
+    latest_target.put_nowait(target)

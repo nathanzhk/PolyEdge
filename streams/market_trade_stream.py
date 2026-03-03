@@ -10,30 +10,15 @@ from py_clob_client.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from streams.market_order_event import MarketOrderEvent, MarketOrderEventStatus
-from streams.market_trade_event import (
-    MarketTradeEvent,
-    MarketTradeEventStatus,
-)
+from streams.market_order_event import MarketOrderEvent
+from streams.market_trade_event import MarketTradeEvent
+from trade.enum import MarketOrderStatus, MarketTradeStatus
 from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
-
-_ORDER_INVALID_STATUSES: set[str] = {
-    "INVALID",
-    "CANCELED",
-    "CANCELED_MARKET_RESOLVED",
-}
-_TRADE_STATUS_MAP: dict[str, MarketTradeEventStatus] = {
-    "MATCHED": MarketTradeEventStatus.PENDING,
-    "MINED": MarketTradeEventStatus.PENDING,
-    "CONFIRMED": MarketTradeEventStatus.SUCCESS,
-    "RETRYING": MarketTradeEventStatus.PENDING,
-    "FAILED": MarketTradeEventStatus.FAILURE,
-}
 
 logger = get_logger("MARKET STREAM")
 
@@ -181,36 +166,18 @@ async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> Non
 
 def _build_order_event(data: dict[str, Any]) -> MarketOrderEvent | None:
     try:
-        ts_ms = int(data["timestamp"])
-        market_id = str(data["market"])
-        token_id = str(data["asset_id"])
-        order_id = str(data["id"])
-        trade_ids = _string_list(data.get("associate_trades"))
-        raw_status = str(data["status"])
         ordered_shares = float(data["original_size"])
         matched_shares = float(data["size_matched"])
-        full_matched = matched_shares > 0.96 * ordered_shares
-        cancelled = raw_status in _ORDER_INVALID_STATUSES
-        if matched_shares > 0:
-            status = MarketOrderEventStatus.MATCHED
-        elif cancelled:
-            status = MarketOrderEventStatus.INVALID
-        else:
-            status = MarketOrderEventStatus.PENDING
-
         return MarketOrderEvent(
-            ts_ms=ts_ms,
-            market_id=market_id,
-            token_id=token_id,
-            order_id=order_id,
-            trade_ids=trade_ids,
-            status=status,
-            raw_status=raw_status,
+            ts_ms=int(data["timestamp"]),
+            market_id=str(data["market"]),
+            token_id=str(data["asset_id"]),
+            order_id=str(data["id"]),
+            trade_ids=_string_list(data.get("associate_trades")),
+            raw_status=MarketOrderStatus(data["status"]),
             ordered_shares=round(ordered_shares, 6),
             pending_shares=round(ordered_shares - matched_shares, 6),
             matched_shares=round(matched_shares, 6),
-            full_matched=full_matched,
-            cancelled=cancelled,
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -218,12 +185,6 @@ def _build_order_event(data: dict[str, Any]) -> MarketOrderEvent | None:
 
 def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEvent | None:
     try:
-        ts_ms = int(data["timestamp"])
-        market_id = str(data["market"])
-        trade_id = str(data["id"])
-        raw_status = str(data["status"])
-        status = _TRADE_STATUS_MAP[raw_status]
-
         if _same_address(data.get("maker_address"), proxy_wallet):
             token_id = str(data["asset_id"])
             order_id = str(data["taker_order_id"])
@@ -235,15 +196,13 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             token_id = str(sub_order["asset_id"])
             order_id = str(sub_order["order_id"])
             shares = float(sub_order["matched_amount"])
-
         return MarketTradeEvent(
-            ts_ms=ts_ms,
-            market_id=market_id,
+            ts_ms=int(data["timestamp"]),
+            market_id=str(data["market"]),
             token_id=token_id,
             order_id=order_id,
-            trade_id=trade_id,
-            raw_status=raw_status,
-            status=status,
+            trade_id=str(data["id"]),
+            raw_status=MarketTradeStatus(data["status"]),
             shares=round(shares, 6),
         )
     except (KeyError, TypeError, ValueError):

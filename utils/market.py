@@ -1,11 +1,19 @@
+from typing import TypedDict
+
 import orjson
 import requests
 
-from models.metadata import MarketMetadata
 from utils.env import Env
 from utils.logger import get_logger
 
 logger = get_logger("MARKET API")
+
+
+class MarketMetadata(TypedDict):
+    id: str
+    title: str
+    tokens: dict[str, str]
+    fee_rate: float
 
 
 def get_market_by_slug(slug: str) -> MarketMetadata | None:

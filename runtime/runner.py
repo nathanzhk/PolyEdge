@@ -14,7 +14,7 @@ from runtime.workers import (
     market_trade_loop,
     strategy_loop,
 )
-from strategies.strategy import Strategy, StrategyDecision
+from strategies.strategy import PositionTarget, Strategy
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
@@ -41,7 +41,7 @@ class Runner:
         self._indicator_state = IndicatorState()
         self._indicator_engine = IndicatorEngine(self._indicator_state)
         self._strategy = strategy
-        self._latest_decision: asyncio.Queue[StrategyDecision] = asyncio.Queue(maxsize=1)
+        self._latest_target: asyncio.Queue[PositionTarget] = asyncio.Queue(maxsize=1)
         self._execution_engine = execution_engine
 
     async def run(self) -> None:
@@ -79,13 +79,13 @@ class Runner:
                     self._market_state,
                     self._indicator_state,
                     self._strategy,
-                    self._latest_decision,
+                    self._latest_target,
                     self._execution_engine,
                 )
             )
             tasks.create_task(
                 execution_loop(
-                    self._latest_decision,
+                    self._latest_target,
                     self._execution_engine,
                     watch_orders=self._market_trade_stream is None,
                 )
