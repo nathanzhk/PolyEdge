@@ -144,16 +144,16 @@ class ExecutionEngine:
             if previous_matched != order.off_chain_matched_shares:
                 should_reconcile = True
 
-            if event.status == MarketOrderEventStatus.INVALID:
+            if event.derived_status == MarketOrderEventStatus.INVALID:
                 order.status = (
                     ManagedOrderStatus.CANCELED
                     if event.cancelled
                     else ManagedOrderStatus.SUBMIT_FAILED
                 )
                 order.status_before_cancel = None
-                order.last_error = event.raw_status.value
+                order.last_error = event.status.value
                 should_reconcile = True
-            elif event.status == MarketOrderEventStatus.MATCHED:
+            elif event.derived_status == MarketOrderEventStatus.MATCHED:
                 order.status = ManagedOrderStatus.MATCHED
                 order.status_before_cancel = None
                 should_reconcile = True
@@ -167,7 +167,7 @@ class ExecutionEngine:
         logger.info(
             "order event: %s %s matched=%.6f pending=%.6f",
             event.order_id,
-            event.raw_status,
+            event.status,
             event.matched_shares,
             event.pending_shares,
         )
@@ -175,7 +175,7 @@ class ExecutionEngine:
             await self._reconcile_target(target)
 
     async def _handle_trade_event(self, event: MarketTradeEvent) -> None:
-        if event.status == MarketTradeEventStatus.FAILURE:
+        if event.derived_status == MarketTradeEventStatus.FAILURE:
             async with self._lock:
                 order = self._orders_by_order_id.get(event.order_id)
                 if order is None:
@@ -183,16 +183,16 @@ class ExecutionEngine:
                     return
                 if order is not None:
                     self._upsert_trade_locked(order, event, ManagedTradeStatus.FAILURE)
-            logger.warning("trade event invalid: %s %s", event.trade_id, event.raw_status)
+            logger.warning("trade event invalid: %s %s", event.trade_id, event.status)
             return
-        if event.status != MarketTradeEventStatus.SUCCESS:
+        if event.derived_status != MarketTradeEventStatus.SUCCESS:
             async with self._lock:
                 order = self._orders_by_order_id.get(event.order_id)
                 if order is None:
                     self._buffer_trade_event_locked(event)
                     return
                 self._upsert_trade_locked(order, event, ManagedTradeStatus.PENDING)
-            logger.debug("trade event pending: %s %s", event.trade_id, event.raw_status)
+            logger.debug("trade event pending: %s %s", event.trade_id, event.status)
             return
 
         should_reconcile = False
@@ -295,7 +295,7 @@ class ExecutionEngine:
         now = now_ts_ms()
         age_s = (now - current.created_ts_ms) / 1000
         price_moved = abs(current.price - target.price) >= self._replace_price_gap
-        size_changed = abs(current.total_shares - shares) >= MATCHED_SHARES_GAP
+        size_changed = abs(current.ordered_shares - shares) >= MATCHED_SHARES_GAP
         ttl_expired = target.style == ExecutionStyle.PASSIVE and age_s >= self._order_ttl_s
         if not price_moved and not size_changed and not ttl_expired:
             return
@@ -309,7 +309,7 @@ class ExecutionEngine:
             "%s: cancel order %s for replace %.6f @ %.2f -> %.6f @ %.2f",
             reason,
             current.order_id,
-            current.total_shares,
+            current.ordered_shares,
             current.price,
             shares,
             target.price,
@@ -358,7 +358,7 @@ class ExecutionEngine:
         client = self._maker_client if draft.as_maker else self._taker_client
         submit_func = client.buy if draft.side == Side.BUY else client.sell
         order_id = await asyncio.to_thread(
-            submit_func, draft.token, draft.total_shares, draft.price
+            submit_func, draft.token, draft.ordered_shares, draft.price
         )
 
         if order_id is None:
@@ -559,7 +559,7 @@ class ExecutionEngine:
                 "order matched: %s %.6f/%.6f",
                 order.order_id,
                 order.matched_shares,
-                order.total_shares,
+                order.ordered_shares,
             )
         return order
 
@@ -631,7 +631,7 @@ class ExecutionEngine:
                 market_id=event.market_id,
                 token_id=event.token_id,
                 shares=event.shares,
-                raw_status=event.raw_status,
+                raw_status=event.status,
                 status=ManagedTradeStatus.PENDING,
                 created_ts_ms=event.ts_ms,
                 updated_ts_ms=event.ts_ms,
@@ -659,10 +659,10 @@ class ExecutionEngine:
             return False
 
         trade.shares = event.shares
-        trade.raw_status = event.raw_status
+        trade.raw_status = event.status
         trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
         order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
-        order.last_error = event.raw_status if status == ManagedTradeStatus.FAILURE else None
+        order.last_error = event.status if status == ManagedTradeStatus.FAILURE else None
 
         if status == ManagedTradeStatus.PENDING:
             trade.status = ManagedTradeStatus.PENDING

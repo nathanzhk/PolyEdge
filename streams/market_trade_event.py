@@ -28,9 +28,9 @@ class MarketTradeEvent:
     token_id: str
     order_id: str
     trade_id: str
-    raw_status: MarketTradeStatus
+    status: MarketTradeStatus
     shares: float
 
     @property
-    def status(self) -> MarketTradeEventStatus:
-        return _TRADE_STATUS_MAP[self.raw_status]
+    def derived_status(self) -> MarketTradeEventStatus:
+        return _TRADE_STATUS_MAP[self.status]

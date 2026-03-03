@@ -25,13 +25,16 @@ class MarketOrderEvent:
     token_id: str
     order_id: str
     trade_ids: list[str]
-    raw_status: MarketOrderStatus
+    status: MarketOrderStatus
     ordered_shares: float
-    pending_shares: float
     matched_shares: float
 
     @property
-    def status(self) -> MarketOrderEventStatus:
+    def pending_shares(self) -> float:
+        return round(self.ordered_shares - self.matched_shares, 6)
+
+    @property
+    def derived_status(self) -> MarketOrderEventStatus:
         if self.matched_shares > 0:
             return MarketOrderEventStatus.MATCHED
         if self.cancelled:
@@ -40,4 +43,4 @@ class MarketOrderEvent:
 
     @property
     def cancelled(self) -> bool:
-        return self.raw_status in _ORDER_INVALID_STATUSES
+        return self.status in _ORDER_INVALID_STATUSES

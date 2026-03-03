@@ -35,10 +35,6 @@ class ManagedOrder:
     trades: dict[str, ManagedTrade] = field(default_factory=dict)
 
     @property
-    def total_shares(self) -> float:
-        return self.ordered_shares
-
-    @property
     def matching_shares(self) -> float:
         return self.off_chain_pending_shares
 

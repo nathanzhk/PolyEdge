@@ -166,18 +166,15 @@ async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> Non
 
 def _build_order_event(data: dict[str, Any]) -> MarketOrderEvent | None:
     try:
-        ordered_shares = float(data["original_size"])
-        matched_shares = float(data["size_matched"])
         return MarketOrderEvent(
             ts_ms=int(data["timestamp"]),
             market_id=str(data["market"]),
             token_id=str(data["asset_id"]),
             order_id=str(data["id"]),
             trade_ids=_string_list(data.get("associate_trades")),
-            raw_status=MarketOrderStatus(data["status"]),
-            ordered_shares=round(ordered_shares, 6),
-            pending_shares=round(ordered_shares - matched_shares, 6),
-            matched_shares=round(matched_shares, 6),
+            status=MarketOrderStatus(data["status"]),
+            ordered_shares=round(float(data["original_size"]), 6),
+            matched_shares=round(float(data["size_matched"]), 6),
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -202,7 +199,7 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             token_id=token_id,
             order_id=order_id,
             trade_id=str(data["id"]),
-            raw_status=MarketTradeStatus(data["status"]),
+            status=MarketTradeStatus(data["status"]),
             shares=round(shares, 6),
         )
     except (KeyError, TypeError, ValueError):

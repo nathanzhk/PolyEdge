@@ -14,3 +14,7 @@ class MarketOrder:
     market_id: str
     token_id: str
     price: float
+
+    @property
+    def pending_shares(self) -> float:
+        return round(self.ordered_shares - self.matched_shares, 6)
