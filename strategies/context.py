@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from indicators.indicator import MacdValue
-from models.market import Market, Token
+from markets.base import Market, Token
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent

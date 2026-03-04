@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from models.btc_market import DOWN_OUTCOME, UP_OUTCOME
-from models.market import Token
+from markets.base import Token
+from markets.btc import DOWN_OUTCOME, UP_OUTCOME
 from strategies.context import PositionLatestState, StrategyContext
 from strategies.strategy import ExecutionStyle, PositionTarget
 from streams.market_price_event import MarketPriceEvent

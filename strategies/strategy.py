@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from models.market import Market, Token
+from markets.base import Market, Token
 from strategies.context import StrategyContext
 
 
