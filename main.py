@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from models.btc_market import BTC5mMarket
+from markets.btc import BTC5mMarket
 from runtime.runner import Runner
 from strategies.logging_strategy import LoggingStrategy
 from streams.crypto_stream import CryptoPriceStream

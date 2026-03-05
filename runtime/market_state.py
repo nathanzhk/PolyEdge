@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from models.market import Market
+from markets.base import Market
 from strategies.context import MarketLatestState
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent

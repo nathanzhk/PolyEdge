@@ -9,7 +9,7 @@ import orjson
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from models.market import Market
+from markets.base import Market
 from streams.market_price_event import MarketPriceEvent
 from utils.env import Env
 from utils.logger import get_logger

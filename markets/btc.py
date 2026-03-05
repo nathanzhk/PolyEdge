@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from models.market import Market, Token
+from markets.base import Market, Token
 from utils.market import get_market_by_slug
 from utils.time import current_5m_window_s, current_15m_window_s
 
