@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from warnings import deprecated
 
-from trade.enum import MarketOrderStatus
+from utils.enum import MarketOrderStatus
 
 _ORDER_INVALID_STATUSES: set[MarketOrderStatus] = {
     MarketOrderStatus.INVALID,

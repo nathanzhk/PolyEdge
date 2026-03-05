@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosed
 
 from streams.market_order_event import MarketOrderEvent
 from streams.market_trade_event import MarketTradeEvent
-from trade.enum import MarketOrderStatus, MarketTradeStatus
+from utils.enum import MarketOrderStatus, MarketTradeStatus
 from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats

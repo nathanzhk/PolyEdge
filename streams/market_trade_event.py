@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from warnings import deprecated
 
-from trade.enum import MarketTradeStatus
+from utils.enum import MarketTradeStatus
 
 
 @deprecated("")
