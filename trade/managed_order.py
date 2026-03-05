@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from markets.base import Market, Token
-from trade.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
+from utils.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 
 TradePurpose = Literal["increase", "reduce"]
 

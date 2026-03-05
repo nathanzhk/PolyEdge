@@ -8,7 +8,6 @@ from strategies.context import PositionLatestState
 from strategies.strategy import ExecutionStyle, PositionTarget
 from streams.market_order_event import MarketOrderEvent, MarketOrderEventStatus
 from streams.market_trade_event import MarketTradeEvent, MarketTradeEventStatus
-from trade.enum import ManagedOrderStatus, ManagedTradeStatus, Side
 from trade.managed_order import (
     ManagedOrder,
     ManagedTrade,
@@ -17,6 +16,7 @@ from trade.managed_order import (
 )
 from trade.market_order import MarketOrder
 from trade.trade_client import TradeClient
+from utils.enum import ManagedOrderStatus, ManagedTradeStatus, Side
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
