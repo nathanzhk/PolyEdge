@@ -5,7 +5,7 @@ import uuid
 
 from markets.base import Token
 from strategies.context import PositionLatestState
-from strategies.strategy import ExecutionStyle, PositionTarget
+from strategies.target import ExecutionStyle, PositionTarget
 from streams.market_order_event import MarketOrderEvent, MarketOrderEventStatus
 from streams.market_trade_event import MarketTradeEvent, MarketTradeEventStatus
 from trade.managed_order import (

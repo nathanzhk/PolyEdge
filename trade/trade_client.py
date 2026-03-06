@@ -35,8 +35,7 @@ class TradeClient:
             chain_id=137,
             signature_type=2,
         )
-        self.credentials = self.get_credentials()
-        self.client.set_api_creds(self.credentials)
+        self.client.set_api_creds(self.get_credentials())
 
     def get_credentials(self) -> ApiCreds:
         return self.client.create_or_derive_api_creds()
