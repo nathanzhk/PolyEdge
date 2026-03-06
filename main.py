@@ -3,7 +3,7 @@ import logging
 
 from markets.btc import BTC5mMarket
 from runtime.runner import Runner
-from strategies.logging_strategy import LoggingStrategy
+from strategies.strategy import DefaultStrategy
 from streams.crypto_stream import CryptoPriceStream
 from streams.market_price_stream import MarketPriceStream
 from streams.market_trade_stream import MarketTradeStream
@@ -30,9 +30,9 @@ async def run() -> None:
     logger.info("starting market price, market trade, and crypto price streams")
     runner = Runner(
         market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=10),
-        market_trade_stream=MarketTradeStream(maker.credentials),
+        market_trade_stream=MarketTradeStream(maker.get_credentials()),
         crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=10),
-        strategy=LoggingStrategy(),
+        strategy=DefaultStrategy(),
         execution_engine=ExecutionEngine(maker, taker),
     )
     await runner.run()
