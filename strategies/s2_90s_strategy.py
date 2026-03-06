@@ -3,7 +3,7 @@ from __future__ import annotations
 from markets.base import Token
 from markets.btc import DOWN_OUTCOME, UP_OUTCOME
 from strategies.context import PositionLatestState, StrategyContext
-from strategies.strategy import ExecutionStyle, PositionTarget
+from strategies.target import ExecutionStyle, PositionTarget
 from streams.market_price_event import MarketPriceEvent
 from utils.logger import get_logger
 
