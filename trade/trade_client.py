@@ -1,6 +1,7 @@
 import time
 from collections.abc import Mapping
-from typing import Any, Literal
+from enum import StrEnum
+from typing import Any
 
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import (
@@ -19,11 +20,14 @@ from utils.enum import MarketOrderStatus, OrderType, Side
 from utils.env import Env
 from utils.logger import get_logger
 
-TradeRole = Literal["maker", "taker"]
+
+class _Role(StrEnum):
+    MAKER = "maker"
+    TAKER = "taker"
 
 
 class TradeClient:
-    role: TradeRole
+    role: _Role
     post_only: bool
 
     def __init__(self) -> None:
@@ -51,9 +55,9 @@ class TradeClient:
         self._warm_up_token(market.no_token)
 
     def fee_rate(self, market: Market) -> float:
-        if self.role == "maker":
+        if self.role == _Role.MAKER:
             return 0.0
-        if self.role == "taker":
+        if self.role == _Role.TAKER:
             return market.fee_rate
         raise ValueError(f"invalid role: {self.role}")
 
@@ -209,12 +213,12 @@ class TradeClient:
 
 
 class MakerTradeClient(TradeClient):
-    role: TradeRole = "maker"
+    role = _Role.MAKER
     post_only = True
 
 
 class TakerTradeClient(TradeClient):
-    role: TradeRole = "taker"
+    role = _Role.TAKER
     post_only = False
 
 
