@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosed
 
 from streams.market_order_event import MarketOrderEvent
 from streams.market_trade_event import MarketTradeEvent
-from utils.enum import MarketOrderStatus, MarketTradeStatus
+from utils.enum import MarketOrderStatus, MarketTradeStatus, Side
 from utils.env import Env
 from utils.logger import get_logger
 from utils.stats import LatencyStats
@@ -166,13 +166,15 @@ async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> Non
 
 def _build_order_event(data: dict[str, Any]) -> MarketOrderEvent | None:
     try:
+        trade_ids = data.get("associate_trades") or []
         return MarketOrderEvent(
             ts_ms=int(data["timestamp"]),
             market_id=str(data["market"]),
             token_id=str(data["asset_id"]),
             order_id=str(data["id"]),
-            trade_ids=_string_list(data.get("associate_trades")),
-            status=MarketOrderStatus(data["status"]),
+            trade_ids=trade_ids if isinstance(trade_ids, list) else [],
+            side=Side(data["side"]),
+            status=MarketOrderStatus(str(data["status"])),
             ordered_shares=round(float(data["original_size"]), 6),
             matched_shares=round(float(data["size_matched"]), 6),
         )
@@ -186,6 +188,7 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             token_id = str(data["asset_id"])
             order_id = str(data["taker_order_id"])
             shares = float(data["size"])
+            side = Side(str(data["side"]))
         else:
             sub_order = _find_sub_order(data.get("maker_orders"), proxy_wallet)
             if sub_order is None:
@@ -193,23 +196,19 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             token_id = str(sub_order["asset_id"])
             order_id = str(sub_order["order_id"])
             shares = float(sub_order["matched_amount"])
+            side = Side(str(sub_order["side"]))
         return MarketTradeEvent(
             ts_ms=int(data["timestamp"]),
             market_id=str(data["market"]),
             token_id=token_id,
             order_id=order_id,
             trade_id=str(data["id"]),
-            status=MarketTradeStatus(data["status"]),
+            side=side,
+            status=MarketTradeStatus(str(data["status"])),
             shares=round(shares, 6),
         )
     except (KeyError, TypeError, ValueError):
         return None
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
 
 
 def _same_address(left: object, right: str) -> bool:

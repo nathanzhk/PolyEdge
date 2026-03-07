@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from utils.enum import MarketTradeStatus
+from utils.enum import MarketTradeStatus, Side
 
 
 @dataclass(slots=True, frozen=True)
@@ -10,5 +10,6 @@ class MarketTradeEvent:
     token_id: str
     order_id: str
     trade_id: str
+    side: Side
     status: MarketTradeStatus
     shares: float
