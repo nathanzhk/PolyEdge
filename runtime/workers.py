@@ -36,7 +36,7 @@ async def market_trade_loop(
     execution_engine: ExecutionEngine,
 ) -> None:
     async for event in stream:
-        await execution_engine.handle_market_event(event)
+        await execution_engine.handle_event(event)
 
 
 async def crypto_price_loop(
