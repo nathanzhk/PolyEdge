@@ -87,6 +87,5 @@ class Runner:
                 execution_loop(
                     self._latest_target,
                     self._execution_engine,
-                    watch_orders=self._market_trade_stream is None,
                 )
             )

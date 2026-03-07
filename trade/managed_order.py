@@ -108,6 +108,6 @@ class ManagedTrade:
 @dataclass(slots=True)
 class Position:
     token: Token
-    shares: float = 0.0
-    updated_ts_ms: int = 0
-    source: Literal["local", "exchange"] = "local"
+    opening_shares: float
+    holding_shares: float
+    closing_shares: float

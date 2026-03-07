@@ -11,7 +11,6 @@ from streams.market_trade_event import MarketTradeEvent
 from trade.managed_order import (
     ManagedOrder,
     ManagedTrade,
-    Position,
     TradePurpose,
 )
 from trade.trade_client import TradeClient
@@ -31,22 +30,19 @@ class ExecutionEngine:
         maker_client: TradeClient,
         taker_client: TradeClient | None = None,
         *,
-        order_poll_interval_s: float = 0.25,
-        position_sync_interval_s: float = 5.0,
         order_ttl_s: float = 2.0,
         replace_price_gap: float = 0.05,
         max_replace_count: int = 20,
     ) -> None:
-        self._maker_client = maker_client
-        self._taker_client = taker_client or maker_client
-        self._order_poll_interval_s = order_poll_interval_s
-        self._position_sync_interval_s = position_sync_interval_s
         self._order_ttl_s = order_ttl_s
         self._replace_price_gap = replace_price_gap
         self._max_replace_count = max_replace_count
-        self._lock = asyncio.Lock()
 
+        self._lock = asyncio.Lock()
         self._target: PositionTarget | None = None
+        self._maker_client = maker_client
+        self._taker_client = taker_client or maker_client
+
         self._tokens_by_token_id: dict[str, Token] = {}
 
         self._orders_by_local_id: dict[str, ManagedOrder] = {}
@@ -59,38 +55,12 @@ class ExecutionEngine:
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
 
-    async def run(
-        self,
-        latest_target: asyncio.Queue[PositionTarget],
-        *,
-        watch_orders: bool = True,
-    ) -> None:
+    async def run(self, latest_target: asyncio.Queue[PositionTarget]) -> None:
         async with asyncio.TaskGroup() as tasks:
             tasks.create_task(self._target_loop(latest_target))
-            if watch_orders:
-                tasks.create_task(self._order_watch_loop())
 
     async def latest_state(self) -> PositionLatestState:
-        async with self._lock:
-            open_orders = tuple(
-                order for order in self._orders_by_local_id.values() if order.has_active_shares
-            )
-            positions = {
-                token_id: Position(
-                    token=token,
-                    shares=shares,
-                    updated_ts_ms=now_ts_ms(),
-                    source="local",
-                )
-                for token_id, shares in self._settled_position_by_token_id.items()
-                if (token := self._tokens_by_token_id.get(token_id)) is not None
-            }
-            unknown_count = 0
-        return PositionLatestState(
-            open_orders=open_orders,
-            positions=positions,
-            unknown_order_count=unknown_count,
-        )
+        return PositionLatestState(positions=[])
 
     async def _target_loop(self, latest_target_queue: asyncio.Queue[PositionTarget]) -> None:
         while True:
@@ -205,50 +175,6 @@ class ExecutionEngine:
                 replace_count=current.replace_count + 1,
             )
 
-    async def _order_watch_loop(self) -> None:
-        while True:
-            for order in await self._open_orders():
-                if order.should_cancel:
-                    continue
-                await self._refresh_order(order.local_id)
-            await asyncio.sleep(self._order_poll_interval_s)
-
-    async def _refresh_order(self, local_id: str) -> ManagedOrder | None:
-        async with self._lock:
-            order = self._orders_by_local_id.get(local_id)
-            if order is None or order.order_id is None:
-                return order
-            order_id = order.order_id
-
-        exchange_order = await asyncio.to_thread(self._maker_client.get_order_by_id, order_id)
-        if exchange_order is None:
-            return None
-
-        async with self._lock:
-            order = self._orders_by_local_id.get(local_id)
-            if order is None:
-                return None
-            order.ordered_shares = exchange_order.ordered_shares
-            order.off_chain_matched_shares = exchange_order.matched_shares
-            order.off_chain_pending_shares = max(
-                ZERO,
-                round(exchange_order.ordered_shares - exchange_order.matched_shares, 6),
-            )
-            order.updated_ts_ms = now_ts_ms()
-            if order.is_effectively_matched:
-                order.status = ManagedOrderStatus.MATCHED
-            elif not order.should_cancel:
-                order.status = ManagedOrderStatus.MATCHING
-
-        if order.is_effectively_matched:
-            logger.info(
-                "order matched: %s %.6f/%.6f",
-                order.order_id,
-                order.off_chain_matched_shares,
-                order.ordered_shares,
-            )
-        return order
-
     async def _open_orders(self) -> list[ManagedOrder]:
         async with self._lock:
             return [order for order in self._orders_by_local_id.values() if order.has_active_shares]
@@ -273,83 +199,6 @@ class ExecutionEngine:
             if order.token.id == target.token.id:
                 continue
             await self._cancel_order(order, reason="target token changed")
-
-    def _upsert_trade_locked(
-        self,
-        order: ManagedOrder,
-        event: MarketTradeEvent,
-        status: ManagedTradeStatus,
-    ) -> bool:
-        if order.order_id is None:
-            return False
-        if order.token.id != event.token_id or order.market.id != event.market_id:
-            logger.warning("ignore mismatched trade event: %s", event)
-            return False
-
-        trade = self._trades_by_trade_id.get(event.trade_id)
-        if trade is None:
-            trade = ManagedTrade(
-                trade_id=event.trade_id,
-                order_id=event.order_id,
-                market_id=event.market_id,
-                token_id=event.token_id,
-                shares=event.shares,
-                mkt_status=event.status,
-                status=ManagedTradeStatus.PENDING,
-                created_ts_ms=event.ts_ms,
-                updated_ts_ms=event.ts_ms,
-            )
-            self._trades_by_trade_id[event.trade_id] = trade
-            self._trade_ids_by_order_id.setdefault(event.order_id, set()).add(event.trade_id)
-        elif trade.order_id != event.order_id:
-            logger.warning(
-                "ignore trade event with changed order id: %s %s -> %s",
-                event.trade_id,
-                trade.order_id,
-                event.order_id,
-            )
-            return False
-        order.trades[event.trade_id] = trade
-
-        if trade.status in {ManagedTradeStatus.SUCCESS, ManagedTradeStatus.FAILURE}:
-            if trade.status != status:
-                logger.warning(
-                    "ignore terminal trade status change: %s %s -> %s",
-                    trade.trade_id,
-                    trade.status,
-                    status,
-                )
-            return False
-
-        trade.shares = event.shares
-        trade.mkt_status = event.status
-        trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
-        order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
-
-        if status == ManagedTradeStatus.PENDING:
-            trade.status = ManagedTradeStatus.PENDING
-            trade.on_chain_pending_shares = event.shares
-            trade.on_chain_settled_shares = ZERO
-            trade.on_chain_failure_shares = ZERO
-            return False
-
-        trade.on_chain_pending_shares = ZERO
-        if status == ManagedTradeStatus.SUCCESS:
-            trade.status = ManagedTradeStatus.SUCCESS
-            trade.on_chain_settled_shares = event.shares
-            trade.on_chain_failure_shares = ZERO
-            self._apply_settled_position_locked(order, event.shares)
-            return True
-
-        trade.status = ManagedTradeStatus.FAILURE
-        trade.on_chain_settled_shares = ZERO
-        trade.on_chain_failure_shares = event.shares
-        return True
-
-    def _apply_settled_position_locked(self, order: ManagedOrder, shares: float) -> None:
-        current = self._settled_position_by_token_id.get(order.token.id, ZERO)
-        signed_shares = shares if order.side == Side.BUY else -shares
-        self._settled_position_by_token_id[order.token.id] = round(current + signed_shares, 6)
 
     async def _submit_order(
         self,

@@ -152,7 +152,8 @@ class S2_90sStrategy:
         elapsed_s: float,
         ts_ms: int,
     ) -> PositionTarget | None:
-        entry_shares = trade.position_shares(self.entry_token) if trade is not None else 0.0
+        # entry_shares = trade.position_shares(self.entry_token) if trade is not None else 0.0
+        entry_shares = 0
         if entry_shares > ENTRY_SHARES - MATCHED_SHARE_GAP:
             logger.info("MAKER BUY: ORDER FILLED")
             self.state = "hold"
@@ -182,7 +183,8 @@ class S2_90sStrategy:
         ts_ms: int,
     ) -> PositionTarget | None:
         token = self.entry_token
-        shares = trade.position_shares(token) if trade is not None else 0.0
+        # shares = trade.position_shares(token) if trade is not None else 0.0
+        shares = 0
         if token is None or self.signal_side is None or shares < MATCHED_SHARE_GAP:
             self.state = "done"
             return None
@@ -210,7 +212,8 @@ class S2_90sStrategy:
         ts_ms: int,
     ) -> PositionTarget | None:
         token = self.entry_token
-        shares = trade.position_shares(token) if trade is not None else 0.0
+        # shares = trade.position_shares(token) if trade is not None else 0.0
+        shares = 0
         if token is None or self.signal_side is None or shares < MATCHED_SHARE_GAP:
             logger.info("EXIT: POSITION CLOSED")
             self.state = "done"

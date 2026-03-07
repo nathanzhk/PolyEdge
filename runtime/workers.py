@@ -88,10 +88,8 @@ async def strategy_loop(
 async def execution_loop(
     latest_target: asyncio.Queue[PositionTarget],
     execution_engine: ExecutionEngine,
-    *,
-    watch_orders: bool = True,
 ) -> None:
-    await execution_engine.run(latest_target, watch_orders=watch_orders)
+    await execution_engine.run(latest_target)
 
 
 def _set_latest_target(
