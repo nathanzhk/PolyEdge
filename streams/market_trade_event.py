@@ -1,24 +1,6 @@
 from dataclasses import dataclass
-from enum import StrEnum
-from warnings import deprecated
 
 from utils.enum import MarketTradeStatus
-
-
-@deprecated("")
-class MarketTradeEventStatus(StrEnum):
-    PENDING = "PENDING"
-    SUCCESS = "SUCCESS"
-    FAILURE = "FAILURE"
-
-
-_TRADE_STATUS_MAP: dict[MarketTradeStatus, MarketTradeEventStatus] = {
-    MarketTradeStatus.MATCHED: MarketTradeEventStatus.PENDING,
-    MarketTradeStatus.MINED: MarketTradeEventStatus.PENDING,
-    MarketTradeStatus.CONFIRMED: MarketTradeEventStatus.SUCCESS,
-    MarketTradeStatus.RETRYING: MarketTradeEventStatus.PENDING,
-    MarketTradeStatus.FAILED: MarketTradeEventStatus.FAILURE,
-}
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,7 +12,3 @@ class MarketTradeEvent:
     trade_id: str
     status: MarketTradeStatus
     shares: float
-
-    @property
-    def derived_status(self) -> MarketTradeEventStatus:
-        return _TRADE_STATUS_MAP[self.status]

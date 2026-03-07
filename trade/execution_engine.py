@@ -6,8 +6,8 @@ import uuid
 from markets.base import Token
 from strategies.context import PositionLatestState
 from strategies.target import ExecutionStyle, PositionTarget
-from streams.market_order_event import MarketOrderEvent, MarketOrderEventStatus
-from streams.market_trade_event import MarketTradeEvent, MarketTradeEventStatus
+from streams.market_order_event import MarketOrderEvent
+from streams.market_trade_event import MarketTradeEvent
 from trade.managed_order import (
     ManagedOrder,
     ManagedTrade,
@@ -15,14 +15,13 @@ from trade.managed_order import (
     TradePurpose,
 )
 from trade.trade_client import TradeClient
-from utils.enum import ManagedOrderStatus, ManagedTradeStatus, Side
+from utils.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
 logger = get_logger("TRADE")
 
 ZERO = 0.0
-_MAX_ORPHAN_EVENTS_PER_ORDER = 16
 MATCHED_SHARES_GAP = 0.1
 
 
@@ -112,99 +111,83 @@ class ExecutionEngine:
             await self._handle_trade_event(event)
 
     async def _handle_order_event(self, event: MarketOrderEvent) -> None:
-        should_reconcile = False
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
-                self._buffer_order_event_locked(event)
-                logger.debug("buffer order event for untracked order %s", event.order_id)
+                cached_events = self._cached_order_events_by_order_id.setdefault(event.order_id, [])
+                cached_events.append(event)
+                logger.debug("cache event for untracked order: %s", event.order_id)
                 return
-            if order.token.id != event.token_id or order.market.id != event.market_id:
+            if event.market_id != order.market.id or event.token_id != order.token.id:
                 logger.warning("ignore mismatched order event: %s", event)
                 return
 
-            previous_matched = order.off_chain_matched_shares
-            self._trade_ids_by_order_id.setdefault(event.order_id, set()).update(event.trade_ids)
-            order.ordered_shares = event.ordered_shares
-            order.off_chain_matched_shares = event.matched_shares
+            order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
             if event.cancelled:
                 order.off_chain_pending_shares = ZERO
+                order.off_chain_matched_shares = event.matched_shares
                 order.off_chain_invalid_shares = event.pending_shares
+                order.status = ManagedOrderStatus.CANCELED
+                order.log("receive cancel event")
             else:
-                order.off_chain_pending_shares = event.pending_shares
-                order.off_chain_invalid_shares = ZERO
-            order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
+                if order.status == ManagedOrderStatus.MATCHING:
+                    order.off_chain_pending_shares = min(
+                        order.off_chain_pending_shares, event.pending_shares
+                    )
+                    order.off_chain_matched_shares = max(
+                        order.off_chain_matched_shares, event.matched_shares
+                    )
+                    order.off_chain_invalid_shares = ZERO
+                    if order.is_effectively_matched:
+                        order.status = ManagedOrderStatus.MATCHED
+                        order.log("filled")
 
-            if previous_matched != order.off_chain_matched_shares:
-                should_reconcile = True
-
-            if event.derived_status == MarketOrderEventStatus.INVALID:
-                order.status = (
-                    ManagedOrderStatus.CANCELED if event.cancelled else ManagedOrderStatus.INVALID
-                )
-                should_reconcile = True
-            elif order.is_effectively_matched:
-                order.status = ManagedOrderStatus.MATCHED
-                should_reconcile = True
-            elif not order.should_cancel:
-                order.status = ManagedOrderStatus.MATCHING
-
-            target = self._target
-            self._log_order_trade_gap_locked(order)
-
-        logger.info(
-            "order event: %s %s matched=%.6f pending=%.6f",
-            event.order_id,
-            event.status,
-            event.matched_shares,
-            event.pending_shares,
-        )
-        if should_reconcile and target is not None and target.token.id == event.token_id:
-            await self._reconcile_target(target)
+            trade_ids_set = self._trade_ids_by_order_id.setdefault(event.order_id, set())
+            trade_ids_set.update(event.trade_ids)
 
     async def _handle_trade_event(self, event: MarketTradeEvent) -> None:
-        if event.derived_status == MarketTradeEventStatus.FAILURE:
-            async with self._lock:
-                order = self._orders_by_order_id.get(event.order_id)
-                if order is None:
-                    self._buffer_trade_event_locked(event)
-                    return
-                if order is not None:
-                    self._upsert_trade_locked(order, event, ManagedTradeStatus.FAILURE)
-            logger.warning("trade event invalid: %s %s", event.trade_id, event.status)
-            return
-        if event.derived_status != MarketTradeEventStatus.SUCCESS:
-            async with self._lock:
-                order = self._orders_by_order_id.get(event.order_id)
-                if order is None:
-                    self._buffer_trade_event_locked(event)
-                    return
-                self._upsert_trade_locked(order, event, ManagedTradeStatus.PENDING)
-            logger.debug("trade event pending: %s %s", event.trade_id, event.status)
-            return
-
-        should_reconcile = False
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
-                self._buffer_trade_event_locked(event)
-                logger.debug("buffer trade event for untracked order %s", event.order_id)
+                cached_events = self._cached_trade_events_by_order_id.setdefault(event.order_id, [])
+                cached_events.append(event)
+                logger.debug("cache event for untracked order: %s", event.order_id)
                 return
-            if order.token.id != event.token_id or order.market.id != event.market_id:
-                logger.warning("ignore mismatched trade event: %s", event)
+            if event.market_id != order.market.id or event.token_id != order.token.id:
+                logger.warning("ignore mismatched order event: %s", event)
                 return
 
-            should_reconcile = self._upsert_trade_locked(order, event, ManagedTradeStatus.SUCCESS)
-            target = self._target
+            trade = self._trades_by_trade_id.get(event.trade_id)
+            if trade is None:
+                trade = ManagedTrade(
+                    market_id=event.market_id,
+                    token_id=event.token_id,
+                    order_id=event.order_id,
+                    trade_id=event.trade_id,
+                    shares=event.shares,
+                    status=ManagedTradeStatus.PENDING,
+                    mkt_status=event.status,
+                    created_ts_ms=event.ts_ms,
+                    updated_ts_ms=event.ts_ms,
+                    on_chain_pending_shares=event.shares,
+                    on_chain_settled_shares=ZERO,
+                    on_chain_failure_shares=ZERO,
+                )
 
-        logger.info(
-            "trade confirmed: %s order=%s shares=%.6f",
-            event.trade_id,
-            event.order_id,
-            event.shares,
-        )
-        if should_reconcile and target is not None and target.token.id == event.token_id:
-            await self._reconcile_target(target)
+            if trade.mkt_status == MarketTradeStatus.CONFIRMED:
+                trade.status = ManagedTradeStatus.SUCCESS
+                trade.on_chain_pending_shares = ZERO
+                trade.on_chain_settled_shares = trade.shares
+                trade.on_chain_failure_shares = ZERO
+            elif trade.mkt_status == MarketTradeStatus.FAILED:
+                trade.status = ManagedTradeStatus.FAILURE
+                trade.on_chain_pending_shares = ZERO
+                trade.on_chain_settled_shares = ZERO
+                trade.on_chain_failure_shares = trade.shares
+
+            order.trades[event.trade_id] = trade
+            self._trades_by_trade_id[event.trade_id] = trade
+            self._trade_ids_by_order_id.setdefault(event.order_id, set()).add(event.trade_id)
 
     async def _reconcile_target(self, target: PositionTarget) -> None:
         await self._cancel_other_token_orders(target)
@@ -517,7 +500,7 @@ class ExecutionEngine:
 
     async def _position_shares(self, token: Token) -> float:
         async with self._lock:
-            return self._committed_position_shares_locked(token.id)
+            return 0  # todo
 
     async def _active_order_for_token(self, token: Token) -> ManagedOrder | None:
         for order in await self._open_orders():
@@ -530,18 +513,6 @@ class ExecutionEngine:
             if order.token.id == target.token.id:
                 continue
             await self._cancel_order(order, reason="target token changed")
-
-    def _buffer_order_event_locked(self, event: MarketOrderEvent) -> None:
-        events = self._cached_order_events_by_order_id.setdefault(event.order_id, [])
-        if len(events) >= _MAX_ORPHAN_EVENTS_PER_ORDER:
-            events.pop(0)
-        events.append(event)
-
-    def _buffer_trade_event_locked(self, event: MarketTradeEvent) -> None:
-        events = self._cached_trade_events_by_order_id.setdefault(event.order_id, [])
-        if len(events) >= _MAX_ORPHAN_EVENTS_PER_ORDER:
-            events.pop(0)
-        events.append(event)
 
     def _upsert_trade_locked(
         self,
@@ -594,14 +565,12 @@ class ExecutionEngine:
         trade.mkt_status = event.status
         trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
         order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
-        order.last_error = event.status if status == ManagedTradeStatus.FAILURE else None
 
         if status == ManagedTradeStatus.PENDING:
             trade.status = ManagedTradeStatus.PENDING
             trade.on_chain_pending_shares = event.shares
             trade.on_chain_settled_shares = ZERO
             trade.on_chain_failure_shares = ZERO
-            self._log_order_trade_gap_locked(order)
             return False
 
         trade.on_chain_pending_shares = ZERO
@@ -610,62 +579,17 @@ class ExecutionEngine:
             trade.on_chain_settled_shares = event.shares
             trade.on_chain_failure_shares = ZERO
             self._apply_settled_position_locked(order, event.shares)
-            self._log_order_trade_gap_locked(order)
             return True
 
         trade.status = ManagedTradeStatus.FAILURE
         trade.on_chain_settled_shares = ZERO
         trade.on_chain_failure_shares = event.shares
-        self._log_order_trade_gap_locked(order)
         return True
 
     def _apply_settled_position_locked(self, order: ManagedOrder, shares: float) -> None:
         current = self._settled_position_by_token_id.get(order.token.id, ZERO)
         signed_shares = shares if order.side == Side.BUY else -shares
         self._settled_position_by_token_id[order.token.id] = round(current + signed_shares, 6)
-
-    def _committed_position_shares_locked(self, token_id: str) -> float:
-        shares = self._settled_position_by_token_id.get(token_id, ZERO)
-        for order in self._orders_by_local_id.values():
-            if order.token.id != token_id or order.order_id is None:
-                continue
-            pending, success, failure = self._order_chain_totals_locked(order.order_id)
-            unknown_matched = max(
-                ZERO,
-                round(order.off_chain_matched_shares - pending - success - failure, 6),
-            )
-            unsettled = pending + unknown_matched
-            if order.side == Side.BUY:
-                shares += unsettled
-            else:
-                shares -= unsettled
-        return max(ZERO, round(shares, 6))
-
-    def _order_chain_totals_locked(self, order_id: str) -> tuple[float, float, float]:
-        pending = ZERO
-        success = ZERO
-        failure = ZERO
-        for trade_id in self._trade_ids_by_order_id.get(order_id, set()):
-            trade = self._trades_by_trade_id.get(trade_id)
-            if trade is None:
-                continue
-            pending += trade.on_chain_pending_shares
-            success += trade.on_chain_settled_shares
-            failure += trade.on_chain_failure_shares
-        return round(pending, 6), round(success, 6), round(failure, 6)
-
-    def _log_order_trade_gap_locked(self, order: ManagedOrder) -> None:
-        if order.order_id is None:
-            return
-        pending, success, failure = self._order_chain_totals_locked(order.order_id)
-        trade_total = round(pending + success + failure, 6)
-        if trade_total > order.off_chain_matched_shares + MATCHED_SHARES_GAP:
-            logger.warning(
-                "trade shares exceed order matched shares: order=%s trades=%.6f matched=%.6f",
-                order.order_id,
-                trade_total,
-                order.off_chain_matched_shares,
-            )
 
 
 def _side_for_target(current_shares: float, target_shares: float) -> Side | None:
