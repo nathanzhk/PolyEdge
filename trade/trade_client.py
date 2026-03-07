@@ -131,18 +131,19 @@ class TradeClient:
                 self.logger.error("invalid response: %s", e)
         return orders
 
-    def cancel_order_by_id(self, order_id: str) -> bool:
+    def cancel_order_by_id(self, order_id: str) -> tuple[bool, str]:
         try:
             resp = self.client.cancel(order_id)
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
-            self.logger.error("cancel order failed: %s", _error_message(e))
-            return False
+            error_message = _error_message(e)
+            self.logger.error("cancel order failed: %s", error_message)
+            return False, error_message
 
         success_list = resp.get("canceled", []) if isinstance(resp, dict) else []
         if order_id in success_list:
-            return True
+            return True, ""
 
         failed_dict = resp.get("not_canceled", {}) if isinstance(resp, dict) else {}
         failed_reason = (
@@ -151,7 +152,7 @@ class TradeClient:
             else "unknown reason"
         )
         self.logger.error("cancel order failed: %s", failed_reason)
-        return False
+        return False, failed_reason
 
     def _warm_up_token(self, token: Token):
         self.logger.debug("warm up %s", token.id)

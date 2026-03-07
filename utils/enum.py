@@ -30,13 +30,11 @@ class MarketTradeStatus(StrEnum):
 
 
 class ManagedOrderStatus(StrEnum):
-    PENDING_SUBMIT = "PENDING_SUBMIT"
-    SUBMIT_FAILED = "SUBMIT_FAILED"
-    PENDING_MATCH = "PENDING_MATCH"
+    CRAFTED = "CRAFTED"
+    INVALID = "INVALID"
+    MATCHING = "MATCHING"
     MATCHED = "MATCHED"
-    PENDING_CANCEL = "PENDING_CANCEL"
     CANCELED = "CANCELED"
-    UNKNOWN = "UNKNOWN"
 
 
 class ManagedTradeStatus(StrEnum):

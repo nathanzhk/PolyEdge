@@ -14,7 +14,6 @@ from trade.managed_order import (
     Position,
     TradePurpose,
 )
-from trade.market_order import MarketOrder
 from trade.trade_client import TradeClient
 from utils.enum import ManagedOrderStatus, ManagedTradeStatus, Side
 from utils.logger import get_logger
@@ -22,6 +21,7 @@ from utils.time import now_ts_ms
 
 logger = get_logger("TRADE")
 
+ZERO = 0.0
 _MAX_ORPHAN_EVENTS_PER_ORDER = 16
 MATCHED_SHARES_GAP = 0.1
 
@@ -74,9 +74,7 @@ class ExecutionEngine:
     async def latest_state(self) -> PositionLatestState:
         async with self._lock:
             open_orders = tuple(
-                order
-                for order in self._orders_by_local_id.values()
-                if _is_open_managed_order(order)
+                order for order in self._orders_by_local_id.values() if order.has_active_shares
             )
             positions = {
                 token_id: Position(
@@ -88,11 +86,7 @@ class ExecutionEngine:
                 for token_id, shares in self._settled_position_by_token_id.items()
                 if (token := self._tokens_by_token_id.get(token_id)) is not None
             }
-            unknown_count = sum(
-                1
-                for order in self._orders_by_local_id.values()
-                if order.status == ManagedOrderStatus.UNKNOWN
-            )
+            unknown_count = 0
         return PositionLatestState(
             open_orders=open_orders,
             positions=positions,
@@ -134,11 +128,11 @@ class ExecutionEngine:
             order.ordered_shares = event.ordered_shares
             order.off_chain_matched_shares = event.matched_shares
             if event.cancelled:
-                order.off_chain_pending_shares = 0.0
+                order.off_chain_pending_shares = ZERO
                 order.off_chain_invalid_shares = event.pending_shares
             else:
                 order.off_chain_pending_shares = event.pending_shares
-                order.off_chain_invalid_shares = 0.0
+                order.off_chain_invalid_shares = ZERO
             order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
 
             if previous_matched != order.off_chain_matched_shares:
@@ -146,20 +140,14 @@ class ExecutionEngine:
 
             if event.derived_status == MarketOrderEventStatus.INVALID:
                 order.status = (
-                    ManagedOrderStatus.CANCELED
-                    if event.cancelled
-                    else ManagedOrderStatus.SUBMIT_FAILED
+                    ManagedOrderStatus.CANCELED if event.cancelled else ManagedOrderStatus.INVALID
                 )
-                order.status_before_cancel = None
-                order.last_error = event.status.value
                 should_reconcile = True
-            elif event.derived_status == MarketOrderEventStatus.MATCHED:
+            elif order.is_effectively_matched:
                 order.status = ManagedOrderStatus.MATCHED
-                order.status_before_cancel = None
                 should_reconcile = True
-            elif order.status != ManagedOrderStatus.PENDING_CANCEL:
-                order.status = ManagedOrderStatus.PENDING_MATCH
-                order.status_before_cancel = None
+            elif not order.should_cancel:
+                order.status = ManagedOrderStatus.MATCHING
 
             target = self._target
             self._log_order_trade_gap_locked(order)
@@ -219,18 +207,14 @@ class ExecutionEngine:
             await self._reconcile_target(target)
 
     async def _reconcile_target(self, target: PositionTarget) -> None:
-        if await self._has_unknown_for_token(target.token):
-            logger.warning("target skipped: unknown order exists for token %s", target.token.key)
-            return
-
         await self._cancel_other_token_orders(target)
 
         current_shares = await self._position_shares(target.token)
         active_order = await self._active_order_for_token(target.token)
-        target_shares = max(0.0, target.shares)
+        target_shares = max(ZERO, target.shares)
 
         if active_order is not None:
-            if active_order.status == ManagedOrderStatus.PENDING_CANCEL:
+            if active_order.should_cancel:
                 return
             desired_side = _side_for_target(current_shares, target_shares)
             if desired_side is None or active_order.side != desired_side:
@@ -279,8 +263,8 @@ class ExecutionEngine:
             )
             return
 
-        if current.status in {ManagedOrderStatus.UNKNOWN, ManagedOrderStatus.PENDING_CANCEL}:
-            return
+        # if current.status in {ManagedOrderStatus.UNKNOWN, ManagedOrderStatus.PENDING_CANCEL}:
+        #     return
         if current.side != side or current.purpose != purpose:
             if await self._cancel_order(current, reason="target side changed"):
                 await self._submit_order(
@@ -335,192 +319,153 @@ class ExecutionEngine:
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
         as_maker = target.style == ExecutionStyle.PASSIVE
-        draft = ManagedOrder(
+        draft_order = ManagedOrder(
             local_id=local_id,
-            purpose=purpose,
+            order_id=None,
             market=target.market,
             token=target.token,
             side=side,
-            ordered_shares=shares,
             price=target.price,
+            status=ManagedOrderStatus.CRAFTED,
+            purpose=purpose,
             as_maker=as_maker,
-            order_id=None,
             created_ts_ms=now,
             updated_ts_ms=now,
-            status=ManagedOrderStatus.PENDING_SUBMIT,
+            ordered_shares=shares,
             off_chain_pending_shares=shares,
+            off_chain_matched_shares=ZERO,
+            off_chain_invalid_shares=ZERO,
             replace_count=replace_count,
         )
+        logger.info("submit order: %s", local_id)
         async with self._lock:
-            self._orders_by_local_id[local_id] = draft
+            self._orders_by_local_id[local_id] = draft_order
             self._tokens_by_token_id[target.token.id] = target.token
 
-        client = self._maker_client if draft.as_maker else self._taker_client
-        submit_func = client.buy if draft.side == Side.BUY else client.sell
-        order_id = await asyncio.to_thread(
-            submit_func, draft.token, draft.ordered_shares, draft.price
+        client = self._maker_client if draft_order.as_maker else self._taker_client
+        submit_order_func = client.buy if draft_order.side == Side.BUY else client.sell
+        market_order_id = await asyncio.to_thread(
+            submit_order_func, draft_order.token, draft_order.ordered_shares, draft_order.price
         )
 
-        if order_id is None:
-            await self._handle_submit_order_failed(local_id, target)
+        if market_order_id is not None:
+            await self._handle_submit_order_success(local_id, market_order_id)
         else:
-            cached_events, should_cancel = await self._handle_submit_order_succeeded(
-                local_id, order_id, target
-            )
-            for event in cached_events:
-                await self.handle_market_event(event)
-            if should_cancel:
-                async with self._lock:
-                    order = self._orders_by_order_id.get(order_id)
-                if order is not None and await self._cancel_order(
-                    order, reason="cancel requested while submitting"
-                ):
-                    async with self._lock:
-                        target = self._target
-                    if target is not None:
-                        await self._reconcile_target(target)
+            await self._handle_submit_order_failed(local_id)
 
-    async def _handle_submit_order_failed(self, local_id: str, target: PositionTarget) -> None:
+    async def _handle_submit_order_success(self, local_id: str, order_id: str) -> None:
+        logger.info("submit order success: %s => %s", local_id, order_id)
         async with self._lock:
             order = self._orders_by_local_id.get(local_id)
             if order is None:
                 return
-            order.updated_ts_ms = now_ts_ms()
-            if order.status == ManagedOrderStatus.PENDING_CANCEL:
-                order.status = ManagedOrderStatus.CANCELED
-                order.status_before_cancel = None
-                order.off_chain_invalid_shares = order.off_chain_pending_shares
-                order.off_chain_pending_shares = 0.0
-                order.last_error = None
-                return
-            order.status = ManagedOrderStatus.SUBMIT_FAILED
-            order.off_chain_invalid_shares = order.off_chain_pending_shares
-            order.off_chain_pending_shares = 0.0
-            order.last_error = "submit failed"
-        logger.warning("order submit failed")
-
-    async def _handle_submit_order_succeeded(
-        self, local_id: str, order_id: str, target: PositionTarget
-    ) -> tuple[list[MarketOrderEvent | MarketTradeEvent], bool]:
-        async with self._lock:
-            order = self._orders_by_local_id.get(local_id)
-            if order is None:
-                return [], False
-            should_cancel = order.status == ManagedOrderStatus.PENDING_CANCEL
             order.updated_ts_ms = now_ts_ms()
             order.order_id = order_id
+            order.status = ManagedOrderStatus.MATCHING
+            order.log("submit success")
             self._orders_by_order_id[order_id] = order
             self._trade_ids_by_order_id.setdefault(order_id, set())
-            if not should_cancel:
-                order.status = ManagedOrderStatus.PENDING_MATCH
-                order.status_before_cancel = None
-            elif order.status_before_cancel == ManagedOrderStatus.PENDING_SUBMIT:
-                order.status_before_cancel = ManagedOrderStatus.PENDING_MATCH
-            cached_events: list[MarketOrderEvent | MarketTradeEvent] = [
-                *self._cached_order_events_by_order_id.pop(order_id, []),
-                *self._cached_trade_events_by_order_id.pop(order_id, []),
-            ]
-        logger.info("order open: %s", order_id)
-        return cached_events, should_cancel
+
+        cached_events: list[MarketOrderEvent | MarketTradeEvent] = [
+            *self._cached_order_events_by_order_id.pop(order_id, []),
+            *self._cached_trade_events_by_order_id.pop(order_id, []),
+        ]
+        for event in cached_events:
+            await self.handle_market_event(event)
+
+        if order.should_cancel:
+            async with self._lock:
+                order = self._orders_by_order_id.get(order_id)
+                if order is None:
+                    return
+                order.log("find should cancel")
+            await self._cancel_order(order, reason="should cancel while submitting")
+
+    async def _handle_submit_order_failed(self, local_id: str) -> None:
+        logger.warning("submit order failed: %s", local_id)
+        async with self._lock:
+            order = self._orders_by_local_id.get(local_id)
+            if order is None:
+                return
+            order.updated_ts_ms = now_ts_ms()
+            order.off_chain_invalid_shares = order.off_chain_pending_shares
+            order.off_chain_pending_shares = ZERO
+            if not order.should_cancel:
+                order.status = ManagedOrderStatus.INVALID
+                order.log("submit failed")
+            else:
+                order.status = ManagedOrderStatus.CANCELED
+                order.should_cancel = False
+                order.log("find should cancel")
 
     async def _cancel_order(self, order: ManagedOrder, *, reason: str) -> bool:
+        logger.info("cancel order: %s => %s", order.local_id, order.order_id)
         if order.order_id is None:
             async with self._lock:
                 latest_order = self._orders_by_local_id.get(order.local_id)
                 if latest_order is None:
                     return False
-                if latest_order.status in {
-                    ManagedOrderStatus.CANCELED,
-                    ManagedOrderStatus.SUBMIT_FAILED,
-                    ManagedOrderStatus.PENDING_CANCEL,
-                }:
+                if not latest_order.has_active_shares:
+                    latest_order.log("cancel without active shares")
                     return True
-                if latest_order.status != ManagedOrderStatus.PENDING_SUBMIT:
+                if latest_order.status == ManagedOrderStatus.CRAFTED:
+                    latest_order.should_cancel = True
+                    latest_order.log("cancel while submitting")
+                    logger.info(
+                        "order should cancel until submit returns: %s (%s)", order.local_id, reason
+                    )
+                else:
+                    latest_order.log("unexpected status")
                     logger.warning(
                         "unexpected order status without order id: %s %s",
                         latest_order.local_id,
                         latest_order.status,
                     )
-                    return False
-                latest_order.status_before_cancel = latest_order.status
-                latest_order.status = ManagedOrderStatus.PENDING_CANCEL
-                latest_order.cancel_attempts += 1
-                latest_order.updated_ts_ms = now_ts_ms()
-            logger.info("order cancel queued until submit returns: %s (%s)", order.local_id, reason)
-            return False
+                return False
 
         async with self._lock:
-            latest_order = self._orders_by_local_id.get(order.local_id)
-            if latest_order is None or latest_order.order_id is None:
+            latest_order = self._orders_by_order_id.get(order.order_id)
+            if latest_order is None:
                 return False
-            if latest_order.status in {ManagedOrderStatus.MATCHED, ManagedOrderStatus.CANCELED}:
-                return latest_order.status == ManagedOrderStatus.CANCELED
-            if latest_order.status != ManagedOrderStatus.PENDING_CANCEL:
-                latest_order.status_before_cancel = latest_order.status
-            latest_order.status = ManagedOrderStatus.PENDING_CANCEL
-            latest_order.cancel_attempts += 1
-            latest_order.updated_ts_ms = now_ts_ms()
-            order_id = latest_order.order_id
-
-        if await asyncio.to_thread(self._maker_client.cancel_order_by_id, order_id):
-            if await self._handle_cancel_order_succeeded(order.local_id, order_id):
-                logger.info("order canceled: %s (%s)", order_id, reason)
+            if not latest_order.has_active_shares:
+                latest_order.log("cancel without active shares")
                 return True
-            logger.info("cancel success ignored after newer order state: %s", order_id)
-            return False
+
+        order_id = order.order_id
+        is_success, error_message = await asyncio.to_thread(
+            self._maker_client.cancel_order_by_id, order_id
+        )
+        if is_success:
+            await self._handle_cancel_order_success(order_id)
         else:
-            await self._handle_cancel_order_failed(
-                order.local_id,
-                order_id,
-                error="cancel rejected",
-            )
-            logger.warning("order cancel failed: %s", order_id)
-            return False
+            await self._handle_cancel_order_failed(order_id, error_message)
+        return is_success
 
-    async def _handle_cancel_order_failed(
-        self,
-        local_id: str,
-        order_id: str,
-        *,
-        error: str,
-    ) -> None:
+    async def _handle_cancel_order_success(self, order_id: str) -> None:
+        logger.info("cancel order success: %s", order_id)
         async with self._lock:
-            order = self._orders_by_local_id.get(local_id)
-            if order is None or order.order_id != order_id:
+            order = self._orders_by_order_id.get(order_id)
+            if order is None:
                 return
-            if order.status in {ManagedOrderStatus.MATCHED, ManagedOrderStatus.CANCELED}:
-                return
-            if order.status != ManagedOrderStatus.PENDING_CANCEL:
-                return
-            order.status = order.status_before_cancel or ManagedOrderStatus.PENDING_MATCH
-            order.status_before_cancel = None
             order.updated_ts_ms = now_ts_ms()
-            order.last_error = error
-
-    async def _handle_cancel_order_succeeded(self, local_id: str, order_id: str) -> bool:
-        async with self._lock:
-            order = self._orders_by_local_id.get(local_id)
-            if order is None or order.order_id != order_id:
-                return False
-            if order.status in {ManagedOrderStatus.MATCHED, ManagedOrderStatus.CANCELED}:
-                return order.status == ManagedOrderStatus.CANCELED
-            if order.status != ManagedOrderStatus.PENDING_CANCEL:
-                return False
             order.status = ManagedOrderStatus.CANCELED
-            order.status_before_cancel = None
-            order.off_chain_invalid_shares = round(
-                order.off_chain_invalid_shares + order.off_chain_pending_shares,
-                6,
-            )
-            order.off_chain_pending_shares = 0.0
+            order.off_chain_invalid_shares = order.off_chain_pending_shares
+            order.off_chain_pending_shares = ZERO
+            order.log("canceled")
+
+    async def _handle_cancel_order_failed(self, order_id: str, error_message: str) -> None:
+        logger.info("cancel order failed: %s", order_id)
+        async with self._lock:
+            order = self._orders_by_order_id.get(order_id)
+            if order is None:
+                return
             order.updated_ts_ms = now_ts_ms()
-            order.last_error = None
-            return True
+            order.log(error_message)
 
     async def _order_watch_loop(self) -> None:
         while True:
             for order in await self._open_orders():
-                if order.status == ManagedOrderStatus.PENDING_CANCEL:
+                if order.should_cancel:
                     continue
                 await self._refresh_order(order.local_id)
             await asyncio.sleep(self._order_poll_interval_s)
@@ -543,45 +488,32 @@ class ExecutionEngine:
             order.ordered_shares = exchange_order.ordered_shares
             order.off_chain_matched_shares = exchange_order.matched_shares
             order.off_chain_pending_shares = max(
-                0.0,
+                ZERO,
                 round(exchange_order.ordered_shares - exchange_order.matched_shares, 6),
             )
             order.updated_ts_ms = now_ts_ms()
-            if _is_matched(exchange_order):
+            if order.is_effectively_matched:
                 order.status = ManagedOrderStatus.MATCHED
-                order.status_before_cancel = None
-            elif order.status != ManagedOrderStatus.PENDING_CANCEL:
-                order.status = ManagedOrderStatus.PENDING_MATCH
-                order.status_before_cancel = None
+            elif not order.should_cancel:
+                order.status = ManagedOrderStatus.MATCHING
 
-        if _is_matched(exchange_order):
+        if order.is_effectively_matched:
             logger.info(
                 "order matched: %s %.6f/%.6f",
                 order.order_id,
-                order.matched_shares,
+                order.off_chain_matched_shares,
                 order.ordered_shares,
             )
         return order
 
     async def _open_orders(self) -> list[ManagedOrder]:
         async with self._lock:
-            return [
-                order
-                for order in self._orders_by_local_id.values()
-                if _is_open_managed_order(order)
-            ]
+            return [order for order in self._orders_by_local_id.values() if order.has_active_shares]
 
     async def _tracked_tokens(self) -> list[Token]:
         async with self._lock:
             tokens = {order.token.id: order.token for order in self._orders_by_local_id.values()}
         return list(tokens.values())
-
-    async def _has_unknown_for_token(self, token: Token) -> bool:
-        async with self._lock:
-            return any(
-                order.token.id == token.id and order.status == ManagedOrderStatus.UNKNOWN
-                for order in self._orders_by_local_id.values()
-            )
 
     async def _position_shares(self, token: Token) -> float:
         async with self._lock:
@@ -631,7 +563,7 @@ class ExecutionEngine:
                 market_id=event.market_id,
                 token_id=event.token_id,
                 shares=event.shares,
-                raw_status=event.status,
+                mkt_status=event.status,
                 status=ManagedTradeStatus.PENDING,
                 created_ts_ms=event.ts_ms,
                 updated_ts_ms=event.ts_ms,
@@ -659,7 +591,7 @@ class ExecutionEngine:
             return False
 
         trade.shares = event.shares
-        trade.raw_status = event.status
+        trade.mkt_status = event.status
         trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
         order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
         order.last_error = event.status if status == ManagedTradeStatus.FAILURE else None
@@ -667,39 +599,39 @@ class ExecutionEngine:
         if status == ManagedTradeStatus.PENDING:
             trade.status = ManagedTradeStatus.PENDING
             trade.on_chain_pending_shares = event.shares
-            trade.on_chain_success_shares = 0.0
-            trade.on_chain_failure_shares = 0.0
+            trade.on_chain_settled_shares = ZERO
+            trade.on_chain_failure_shares = ZERO
             self._log_order_trade_gap_locked(order)
             return False
 
-        trade.on_chain_pending_shares = 0.0
+        trade.on_chain_pending_shares = ZERO
         if status == ManagedTradeStatus.SUCCESS:
             trade.status = ManagedTradeStatus.SUCCESS
-            trade.on_chain_success_shares = event.shares
-            trade.on_chain_failure_shares = 0.0
+            trade.on_chain_settled_shares = event.shares
+            trade.on_chain_failure_shares = ZERO
             self._apply_settled_position_locked(order, event.shares)
             self._log_order_trade_gap_locked(order)
             return True
 
         trade.status = ManagedTradeStatus.FAILURE
-        trade.on_chain_success_shares = 0.0
+        trade.on_chain_settled_shares = ZERO
         trade.on_chain_failure_shares = event.shares
         self._log_order_trade_gap_locked(order)
         return True
 
     def _apply_settled_position_locked(self, order: ManagedOrder, shares: float) -> None:
-        current = self._settled_position_by_token_id.get(order.token.id, 0.0)
+        current = self._settled_position_by_token_id.get(order.token.id, ZERO)
         signed_shares = shares if order.side == Side.BUY else -shares
         self._settled_position_by_token_id[order.token.id] = round(current + signed_shares, 6)
 
     def _committed_position_shares_locked(self, token_id: str) -> float:
-        shares = self._settled_position_by_token_id.get(token_id, 0.0)
+        shares = self._settled_position_by_token_id.get(token_id, ZERO)
         for order in self._orders_by_local_id.values():
             if order.token.id != token_id or order.order_id is None:
                 continue
             pending, success, failure = self._order_chain_totals_locked(order.order_id)
             unknown_matched = max(
-                0.0,
+                ZERO,
                 round(order.off_chain_matched_shares - pending - success - failure, 6),
             )
             unsettled = pending + unknown_matched
@@ -707,18 +639,18 @@ class ExecutionEngine:
                 shares += unsettled
             else:
                 shares -= unsettled
-        return max(0.0, round(shares, 6))
+        return max(ZERO, round(shares, 6))
 
     def _order_chain_totals_locked(self, order_id: str) -> tuple[float, float, float]:
-        pending = 0.0
-        success = 0.0
-        failure = 0.0
+        pending = ZERO
+        success = ZERO
+        failure = ZERO
         for trade_id in self._trade_ids_by_order_id.get(order_id, set()):
             trade = self._trades_by_trade_id.get(trade_id)
             if trade is None:
                 continue
             pending += trade.on_chain_pending_shares
-            success += trade.on_chain_success_shares
+            success += trade.on_chain_settled_shares
             failure += trade.on_chain_failure_shares
         return round(pending, 6), round(success, 6), round(failure, 6)
 
@@ -734,17 +666,6 @@ class ExecutionEngine:
                 trade_total,
                 order.off_chain_matched_shares,
             )
-
-
-def _is_matched(order: MarketOrder) -> bool:
-    return (
-        order.ordered_shares > 0
-        and order.matched_shares > order.ordered_shares - MATCHED_SHARES_GAP
-    )
-
-
-def _is_open_managed_order(order: ManagedOrder) -> bool:
-    return order.off_chain_pending_shares > 0
 
 
 def _side_for_target(current_shares: float, target_shares: float) -> Side | None:
