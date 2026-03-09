@@ -4,7 +4,7 @@ import asyncio
 import uuid
 
 from markets.base import Token
-from strategies.context import PositionLatestState
+from strategies.context import Position, PositionLatestState
 from strategies.target import ExecutionStyle, PositionTarget
 from streams.market_order_event import MarketOrderEvent
 from streams.market_trade_event import MarketTradeEvent
@@ -50,46 +50,44 @@ class ExecutionEngine:
 
         self._trades_by_trade_id: dict[str, ManagedTrade] = {}
         self._trade_ids_by_order_id: dict[str, set[str]] = {}
-        self._settled_position_by_token_id: dict[str, float] = {}
+        self._settled_shares_by_token_id: dict[str, float] = {}
 
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
 
-    async def run(self, latest_target: asyncio.Queue[PositionTarget]) -> None:
-        async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(self._target_loop(latest_target))
-
     async def latest_state(self) -> PositionLatestState:
-        return PositionLatestState(positions=[])
-
-    async def _target_loop(self, latest_target_queue: asyncio.Queue[PositionTarget]) -> None:
-        while True:
-            target = await latest_target_queue.get()
-            await self.handle_position_target(target)
+        async with self._lock:
+            positions = self._calc_positions_by_token()
+            return PositionLatestState(positions=list(positions.values()))
 
     async def handle_position_target(self, target: PositionTarget) -> None:
         async with self._lock:
             self._target = target
             self._tokens_by_token_id[target.token.id] = target.token
 
-        await self._reconcile_target(target)
-
-    async def _reconcile_target(self, target: PositionTarget) -> None:
         await self._cancel_other_token_orders(target)
 
-        current_shares = await self._position_shares(target.token)
+        async with self._lock:
+            position = self._calc_positions_by_token().get(target.token.id)
+            if position is None:
+                current_shares = ZERO
+            else:
+                current_shares = round(
+                    position.holding_shares + position.opening_shares - position.closing_shares,
+                    6,
+                )
         active_order = await self._active_order_for_token(target.token)
         target_shares = max(ZERO, target.shares)
 
         if active_order is not None:
             if active_order.should_cancel:
                 return
-            desired_side = _side_for_target(current_shares, target_shares)
-            if desired_side is None or active_order.side != desired_side:
+            desired_side = Side.BUY if target_shares > current_shares else Side.SELL
+            if active_order.side != desired_side:
                 await self._cancel_order(active_order, reason="target changed")
                 return
 
-        if target_shares > current_shares + MATCHED_SHARES_GAP:
+        if target_shares > current_shares:
             delta = round(target_shares - current_shares, 6)
             await self._ensure_target_order(
                 target,
@@ -99,7 +97,7 @@ class ExecutionEngine:
             )
             return
 
-        if target_shares < current_shares - MATCHED_SHARES_GAP:
+        if target_shares < current_shares:
             delta = round(current_shares - target_shares, 6)
             await self._ensure_target_order(
                 target,
@@ -175,30 +173,49 @@ class ExecutionEngine:
                 replace_count=current.replace_count + 1,
             )
 
-    async def _open_orders(self) -> list[ManagedOrder]:
+    async def _active_orders(self) -> list[ManagedOrder]:
         async with self._lock:
             return [order for order in self._orders_by_local_id.values() if order.has_active_shares]
 
-    async def _tracked_tokens(self) -> list[Token]:
-        async with self._lock:
-            tokens = {order.token.id: order.token for order in self._orders_by_local_id.values()}
-        return list(tokens.values())
-
-    async def _position_shares(self, token: Token) -> float:
-        async with self._lock:
-            return 0  # todo
-
     async def _active_order_for_token(self, token: Token) -> ManagedOrder | None:
-        for order in await self._open_orders():
+        for order in await self._active_orders():
             if order.token.id == token.id:
                 return order
         return None
 
     async def _cancel_other_token_orders(self, target: PositionTarget) -> None:
-        for order in await self._open_orders():
+        for order in await self._active_orders():
             if order.token.id == target.token.id:
                 continue
             await self._cancel_order(order, reason="target token changed")
+
+    def _calc_positions_by_token(self) -> dict[str, Position]:
+        positions: dict[str, Position] = {}
+
+        def position_for_token(token: Token) -> Position:
+            position = positions.get(token.id)
+            if position is None:
+                position = Position(
+                    token=token,
+                    opening_shares=ZERO,
+                    holding_shares=self._settled_shares_by_token_id.get(token.id, ZERO),
+                    closing_shares=ZERO,
+                )
+                positions[token.id] = position
+            return position
+
+        for token in self._tokens_by_token_id.values():
+            position_for_token(token)
+
+        for order in self._orders_by_local_id.values():
+            position = position_for_token(order.token)
+            unsettled_shares = order.off_chain_pending_shares + order.on_chain_pending_shares
+            if order.side == Side.BUY:
+                position.opening_shares = round(position.opening_shares + unsettled_shares, 6)
+            else:
+                position.closing_shares = round(position.closing_shares + unsettled_shares, 6)
+
+        return positions
 
     async def _submit_order(
         self,
@@ -425,25 +442,33 @@ class ExecutionEngine:
                     on_chain_failure_shares=ZERO,
                 )
 
-            if trade.mkt_status == MarketTradeStatus.CONFIRMED:
-                trade.status = ManagedTradeStatus.SUCCESS
-                trade.on_chain_pending_shares = ZERO
-                trade.on_chain_settled_shares = trade.shares
-                trade.on_chain_failure_shares = ZERO
-            elif trade.mkt_status == MarketTradeStatus.FAILED:
+            trade.shares = event.shares
+            trade.mkt_status = event.status
+            trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
+
+            if event.status == MarketTradeStatus.CONFIRMED:
+                if trade.status != ManagedTradeStatus.SUCCESS:
+                    trade.status = ManagedTradeStatus.SUCCESS
+                    trade.on_chain_pending_shares = ZERO
+                    trade.on_chain_settled_shares = trade.shares
+                    trade.on_chain_failure_shares = ZERO
+                    settled_shares = self._settled_shares_by_token_id.get(event.token_id, ZERO)
+                    if event.side == Side.BUY:
+                        settled_shares += trade.shares
+                    else:
+                        settled_shares -= trade.shares
+                    self._settled_shares_by_token_id[event.token_id] = round(settled_shares, 6)
+            elif event.status == MarketTradeStatus.FAILED:
                 trade.status = ManagedTradeStatus.FAILURE
                 trade.on_chain_pending_shares = ZERO
                 trade.on_chain_settled_shares = ZERO
                 trade.on_chain_failure_shares = trade.shares
+            else:
+                trade.status = ManagedTradeStatus.PENDING
+                trade.on_chain_pending_shares = trade.shares
+                trade.on_chain_settled_shares = ZERO
+                trade.on_chain_failure_shares = ZERO
 
             order.trades[event.trade_id] = trade
             self._trades_by_trade_id[event.trade_id] = trade
             self._trade_ids_by_order_id.setdefault(event.order_id, set()).add(event.trade_id)
-
-
-def _side_for_target(current_shares: float, target_shares: float) -> Side | None:
-    if target_shares > current_shares + MATCHED_SHARES_GAP:
-        return Side.BUY
-    if target_shares < current_shares - MATCHED_SHARES_GAP:
-        return Side.SELL
-    return None

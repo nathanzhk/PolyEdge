@@ -103,11 +103,3 @@ class ManagedTrade:
     on_chain_pending_shares: float = 0.0
     on_chain_settled_shares: float = 0.0
     on_chain_failure_shares: float = 0.0
-
-
-@dataclass(slots=True)
-class Position:
-    token: Token
-    opening_shares: float
-    holding_shares: float
-    closing_shares: float

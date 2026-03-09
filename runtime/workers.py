@@ -89,7 +89,9 @@ async def execution_loop(
     latest_target: asyncio.Queue[PositionTarget],
     execution_engine: ExecutionEngine,
 ) -> None:
-    await execution_engine.run(latest_target)
+    while True:
+        target = await latest_target.get()
+        await execution_engine.handle_position_target(target)
 
 
 def _set_latest_target(

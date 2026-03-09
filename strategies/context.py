@@ -5,7 +5,14 @@ from markets.base import Market, Token
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
-from trade.managed_order import Position
+
+
+@dataclass(slots=True)
+class Position:
+    token: Token
+    opening_shares: float
+    holding_shares: float
+    closing_shares: float
 
 
 @dataclass(slots=True, frozen=True)
