@@ -13,3 +13,4 @@ class MarketTradeEvent:
     side: Side
     status: MarketTradeStatus
     shares: float
+    price: float

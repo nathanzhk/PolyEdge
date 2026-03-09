@@ -189,6 +189,7 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             order_id = str(data["taker_order_id"])
             shares = float(data["size"])
             side = Side(str(data["side"]))
+            price = float(data["price"])
         else:
             sub_order = _find_sub_order(data.get("maker_orders"), proxy_wallet)
             if sub_order is None:
@@ -197,6 +198,7 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             order_id = str(sub_order["order_id"])
             shares = float(sub_order["matched_amount"])
             side = Side(str(sub_order["side"]))
+            price = float(sub_order["price"])
         return MarketTradeEvent(
             ts_ms=int(data["timestamp"]),
             market_id=str(data["market"]),
@@ -206,6 +208,7 @@ def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEv
             side=side,
             status=MarketTradeStatus(str(data["status"])),
             shares=round(shares, 6),
+            price=round(price, 3),
         )
     except (KeyError, TypeError, ValueError):
         return None
