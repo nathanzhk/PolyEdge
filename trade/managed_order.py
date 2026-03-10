@@ -93,13 +93,14 @@ class ManagedTrade:
     order_id: str
     trade_id: str
 
-    shares: float
     status: ManagedTradeStatus
     mkt_status: MarketTradeStatus
 
     created_ts_ms: int
     updated_ts_ms: int
 
+    price: float
+    shares: float
     on_chain_pending_shares: float = 0.0
     on_chain_settled_shares: float = 0.0
     on_chain_failure_shares: float = 0.0

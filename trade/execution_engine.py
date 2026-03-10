@@ -51,6 +51,8 @@ class ExecutionEngine:
         self._trades_by_trade_id: dict[str, ManagedTrade] = {}
         self._trade_ids_by_order_id: dict[str, set[str]] = {}
         self._settled_shares_by_token_id: dict[str, float] = {}
+        self._settled_cost_by_token_id: dict[str, float] = {}
+        self._settled_open_ts_ms_by_token_id: dict[str, int] = {}
 
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
@@ -195,11 +197,16 @@ class ExecutionEngine:
         def position_for_token(token: Token) -> Position:
             position = positions.get(token.id)
             if position is None:
+                holding_shares = self._settled_shares_by_token_id.get(token.id, ZERO)
+                holding_cost = self._settled_cost_by_token_id.get(token.id, ZERO)
                 position = Position(
                     token=token,
                     opening_shares=ZERO,
-                    holding_shares=self._settled_shares_by_token_id.get(token.id, ZERO),
+                    holding_shares=holding_shares,
                     closing_shares=ZERO,
+                    holding_avg_price=self._calc_holding_avg_price(holding_shares, holding_cost),
+                    holding_cost=holding_cost,
+                    holding_open_ts_ms=self._settled_open_ts_ms_by_token_id.get(token.id),
                 )
                 positions[token.id] = position
             return position
@@ -432,17 +439,19 @@ class ExecutionEngine:
                     token_id=event.token_id,
                     order_id=event.order_id,
                     trade_id=event.trade_id,
-                    shares=event.shares,
                     status=ManagedTradeStatus.PENDING,
                     mkt_status=event.status,
                     created_ts_ms=event.ts_ms,
                     updated_ts_ms=event.ts_ms,
+                    price=event.price,
+                    shares=event.shares,
                     on_chain_pending_shares=event.shares,
                     on_chain_settled_shares=ZERO,
                     on_chain_failure_shares=ZERO,
                 )
 
             trade.shares = event.shares
+            trade.price = event.price
             trade.mkt_status = event.status
             trade.updated_ts_ms = max(trade.updated_ts_ms, event.ts_ms)
 
@@ -452,12 +461,13 @@ class ExecutionEngine:
                     trade.on_chain_pending_shares = ZERO
                     trade.on_chain_settled_shares = trade.shares
                     trade.on_chain_failure_shares = ZERO
-                    settled_shares = self._settled_shares_by_token_id.get(event.token_id, ZERO)
-                    if event.side == Side.BUY:
-                        settled_shares += trade.shares
-                    else:
-                        settled_shares -= trade.shares
-                    self._settled_shares_by_token_id[event.token_id] = round(settled_shares, 6)
+                    self._apply_settled_trade_to_position(
+                        token_id=event.token_id,
+                        side=event.side,
+                        shares=trade.shares,
+                        price=trade.price,
+                        created_ts_ms=trade.created_ts_ms,
+                    )
             elif event.status == MarketTradeStatus.FAILED:
                 trade.status = ManagedTradeStatus.FAILURE
                 trade.on_chain_pending_shares = ZERO
@@ -472,3 +482,57 @@ class ExecutionEngine:
             order.trades[event.trade_id] = trade
             self._trades_by_trade_id[event.trade_id] = trade
             self._trade_ids_by_order_id.setdefault(event.order_id, set()).add(event.trade_id)
+
+    def _apply_settled_trade_to_position(
+        self,
+        *,
+        token_id: str,
+        side: Side,
+        shares: float,
+        price: float,
+        created_ts_ms: int,
+    ) -> None:
+        current_shares = self._settled_shares_by_token_id.get(token_id, ZERO)
+        current_cost = self._settled_cost_by_token_id.get(token_id, ZERO)
+        current_open_ts_ms = self._settled_open_ts_ms_by_token_id.get(token_id)
+
+        if side == Side.BUY:
+            next_shares = current_shares + shares
+            next_cost = current_cost + shares * price
+            next_open_ts_ms = (
+                min(current_open_ts_ms, created_ts_ms)
+                if current_open_ts_ms is not None
+                else created_ts_ms
+            )
+        else:
+            reduce_shares = min(shares, current_shares)
+            avg_price = (
+                current_cost / current_shares if current_shares > MATCHED_SHARES_GAP else ZERO
+            )
+            next_shares = current_shares - reduce_shares
+            next_cost = current_cost - reduce_shares * avg_price
+            next_open_ts_ms = current_open_ts_ms
+            if shares > current_shares:
+                logger.warning(
+                    "sell settled shares exceed holding: token=%s sell=%.6f holding=%.6f",
+                    token_id,
+                    shares,
+                    current_shares,
+                )
+
+        if next_shares <= MATCHED_SHARES_GAP:
+            next_shares = ZERO
+            next_cost = ZERO
+            next_open_ts_ms = None
+
+        self._settled_shares_by_token_id[token_id] = round(next_shares, 6)
+        self._settled_cost_by_token_id[token_id] = round(next_cost, 6)
+        if next_open_ts_ms is None:
+            self._settled_open_ts_ms_by_token_id.pop(token_id, None)
+        else:
+            self._settled_open_ts_ms_by_token_id[token_id] = next_open_ts_ms
+
+    def _calc_holding_avg_price(self, shares: float, cost: float) -> float | None:
+        if shares <= MATCHED_SHARES_GAP:
+            return None
+        return round(cost / shares, 3)
