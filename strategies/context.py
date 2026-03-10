@@ -13,6 +13,9 @@ class Position:
     opening_shares: float
     holding_shares: float
     closing_shares: float
+    holding_avg_price: float | None = None
+    holding_cost: float = 0.0
+    holding_open_ts_ms: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
