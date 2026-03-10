@@ -14,7 +14,7 @@ class ExecutionStyle(StrEnum):
 @dataclass(slots=True, frozen=True)
 class PositionTarget:
     market: Market
-    token: Token
+    token: Token | None
     shares: float
     price: float
     style: ExecutionStyle = ExecutionStyle.PASSIVE
