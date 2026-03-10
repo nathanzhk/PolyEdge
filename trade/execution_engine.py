@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Coroutine
+from typing import Any
 
 from markets.base import Token
 from strategies.context import Position, PositionLatestState
@@ -56,6 +58,8 @@ class ExecutionEngine:
 
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
+        self._pending_replace_count_by_token_id: dict[str, int] = {}
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def latest_state(self) -> PositionLatestState:
         async with self._lock:
@@ -134,14 +138,11 @@ class ExecutionEngine:
         # if current.status in {ManagedOrderStatus.UNKNOWN, ManagedOrderStatus.PENDING_CANCEL}:
         #     return
         if current.side != side or current.purpose != purpose:
-            if await self._cancel_order(current, reason="target side changed"):
-                await self._submit_order(
-                    target,
-                    side=side,
-                    shares=shares,
-                    purpose=purpose,
-                    replace_count=current.replace_count + 1,
-                )
+            await self._cancel_order(
+                current,
+                reason="target side changed",
+                next_replace_count=current.replace_count + 1,
+            )
             return
 
         now = now_ts_ms()
@@ -166,14 +167,11 @@ class ExecutionEngine:
             shares,
             target.price,
         )
-        if await self._cancel_order(current, reason=reason):
-            await self._submit_order(
-                target,
-                side=side,
-                shares=shares,
-                purpose=purpose,
-                replace_count=current.replace_count + 1,
-            )
+        await self._cancel_order(
+            current,
+            reason=reason,
+            next_replace_count=current.replace_count + 1,
+        )
 
     async def _active_orders(self) -> list[ManagedOrder]:
         async with self._lock:
@@ -233,6 +231,10 @@ class ExecutionEngine:
         purpose: TradePurpose,
         replace_count: int,
     ) -> None:
+        async with self._lock:
+            replace_count = self._pending_replace_count_by_token_id.pop(
+                target.token.id, replace_count
+            )
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
         as_maker = target.style == ExecutionStyle.PASSIVE
@@ -259,16 +261,46 @@ class ExecutionEngine:
             self._orders_by_local_id[local_id] = draft_order
             self._tokens_by_token_id[target.token.id] = target.token
 
-        client = self._maker_client if draft_order.as_maker else self._taker_client
-        submit_order_func = client.buy if draft_order.side == Side.BUY else client.sell
-        market_order_id = await asyncio.to_thread(
-            submit_order_func, draft_order.token, draft_order.ordered_shares, draft_order.price
+        self._track_background_task(
+            self._submit_order_worker(local_id),
+            name=f"submit-order-{local_id}",
         )
+
+    async def _submit_order_worker(self, local_id: str) -> None:
+        async with self._lock:
+            draft_order = self._orders_by_local_id.get(local_id)
+            if draft_order is None:
+                return
+            client = self._maker_client if draft_order.as_maker else self._taker_client
+            submit_order_func = client.buy if draft_order.side == Side.BUY else client.sell
+            token = draft_order.token
+            shares = draft_order.ordered_shares
+            price = draft_order.price
+
+        try:
+            market_order_id = await asyncio.to_thread(submit_order_func, token, shares, price)
+        except Exception:
+            await self._handle_submit_order_failed(local_id)
+            raise
 
         if market_order_id is not None:
             await self._handle_submit_order_success(local_id, market_order_id)
         else:
             await self._handle_submit_order_failed(local_id)
+
+    def _track_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("background task failed: %s", task.get_name())
 
     async def _handle_submit_order_success(self, local_id: str, order_id: str) -> None:
         logger.info("submit order success: %s => %s", local_id, order_id)
@@ -295,6 +327,7 @@ class ExecutionEngine:
                 order = self._orders_by_order_id.get(order_id)
                 if order is None:
                     return
+                order.should_cancel = False
                 order.log("find should cancel")
             await self._cancel_order(order, reason="should cancel while submitting")
 
@@ -315,21 +348,35 @@ class ExecutionEngine:
                 order.should_cancel = False
                 order.log("find should cancel")
 
-    async def _cancel_order(self, order: ManagedOrder, *, reason: str) -> bool:
+    async def _cancel_order(
+        self,
+        order: ManagedOrder,
+        *,
+        reason: str,
+        next_replace_count: int | None = None,
+    ) -> bool:
         logger.info("cancel order: %s => %s", order.local_id, order.order_id)
-        if order.order_id is None:
-            async with self._lock:
+        async with self._lock:
+            if order.order_id is None:
                 latest_order = self._orders_by_local_id.get(order.local_id)
-                if latest_order is None:
-                    return False
-                if not latest_order.has_active_shares:
-                    latest_order.log("cancel without active shares")
-                    return True
+            else:
+                latest_order = self._orders_by_order_id.get(order.order_id)
+            if latest_order is None:
+                return False
+            if not latest_order.has_active_shares:
+                latest_order.log("cancel without active shares")
+                return True
+            if next_replace_count is not None:
+                self._pending_replace_count_by_token_id[latest_order.token.id] = next_replace_count
+            if latest_order.order_id is None:
                 if latest_order.status == ManagedOrderStatus.CRAFTED:
                     latest_order.should_cancel = True
+                    latest_order.updated_ts_ms = now_ts_ms()
                     latest_order.log("cancel while submitting")
                     logger.info(
-                        "order should cancel until submit returns: %s (%s)", order.local_id, reason
+                        "order should cancel until submit returns: %s (%s)",
+                        latest_order.local_id,
+                        reason,
                     )
                 else:
                     latest_order.log("unexpected status")
@@ -339,24 +386,33 @@ class ExecutionEngine:
                         latest_order.status,
                     )
                 return False
-
-        async with self._lock:
-            latest_order = self._orders_by_order_id.get(order.order_id)
-            if latest_order is None:
+            if latest_order.should_cancel:
                 return False
-            if not latest_order.has_active_shares:
-                latest_order.log("cancel without active shares")
-                return True
+            latest_order.should_cancel = True
+            latest_order.cancel_attempts += 1
+            latest_order.updated_ts_ms = now_ts_ms()
+            latest_order.log(f"cancel requested: {reason}")
+            order_id = latest_order.order_id
 
-        order_id = order.order_id
-        is_success, error_message = await asyncio.to_thread(
-            self._maker_client.cancel_order_by_id, order_id
+        self._track_background_task(
+            self._cancel_order_worker(order_id),
+            name=f"cancel-order-{order_id}",
         )
+        return True
+
+    async def _cancel_order_worker(self, order_id: str) -> None:
+        try:
+            is_success, error_message = await asyncio.to_thread(
+                self._maker_client.cancel_order_by_id, order_id
+            )
+        except Exception as exc:
+            await self._handle_cancel_order_failed(order_id, f"cancel raised: {exc!r}")
+            raise
+
         if is_success:
             await self._handle_cancel_order_success(order_id)
         else:
             await self._handle_cancel_order_failed(order_id, error_message)
-        return is_success
 
     async def _handle_cancel_order_success(self, order_id: str) -> None:
         logger.info("cancel order success: %s", order_id)
@@ -365,6 +421,7 @@ class ExecutionEngine:
             if order is None:
                 return
             order.updated_ts_ms = now_ts_ms()
+            order.should_cancel = False
             order.status = ManagedOrderStatus.CANCELED
             order.off_chain_invalid_shares = order.off_chain_pending_shares
             order.off_chain_pending_shares = ZERO
@@ -377,6 +434,7 @@ class ExecutionEngine:
             if order is None:
                 return
             order.updated_ts_ms = now_ts_ms()
+            order.should_cancel = False
             order.log(error_message)
 
     async def handle_event(self, event: MarketOrderEvent | MarketTradeEvent) -> None:
@@ -402,6 +460,7 @@ class ExecutionEngine:
                 order.off_chain_pending_shares = ZERO
                 order.off_chain_matched_shares = event.matched_shares
                 order.off_chain_invalid_shares = event.pending_shares
+                order.should_cancel = False
                 order.status = ManagedOrderStatus.CANCELED
                 order.log("receive cancel event")
             else:
@@ -414,6 +473,7 @@ class ExecutionEngine:
                     )
                     order.off_chain_invalid_shares = ZERO
                     if order.is_effectively_matched:
+                        order.should_cancel = False
                         order.status = ManagedOrderStatus.MATCHED
                         order.log("filled")
 

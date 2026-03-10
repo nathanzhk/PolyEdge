@@ -137,11 +137,19 @@ class SupermanStrategy:
                 )
             else:
                 return PositionTarget(
-                    market=market, token=None, shares=0.0, price=0.0, style=ExecutionStyle.PASSIVE
+                    market=market,
+                    token=position.token,
+                    shares=0.0,
+                    price=0.0,
+                    style=ExecutionStyle.PASSIVE,
                 )
         else:
             return PositionTarget(
-                market=market, token=None, shares=0.0, price=0.0, style=ExecutionStyle.PASSIVE
+                market=market,
+                token=position.token,
+                shares=0.0,
+                price=0.0,
+                style=ExecutionStyle.PASSIVE,
             )
 
     def _holding(
@@ -156,7 +164,7 @@ class SupermanStrategy:
         if elapsed_s > self.config.maker_exit_sec:
             return PositionTarget(
                 market=market,
-                token=None,
+                token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_price, position.token),
                 style=ExecutionStyle.PASSIVE,
@@ -174,7 +182,7 @@ class SupermanStrategy:
         if elapsed_s < self.config.taker_exit_sec:
             return PositionTarget(
                 market=market,
-                token=None,
+                token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_price, position.token),
                 style=ExecutionStyle.PASSIVE,
@@ -182,7 +190,7 @@ class SupermanStrategy:
         else:
             return PositionTarget(
                 market=market,
-                token=None,
+                token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_price, position.token),
                 style=ExecutionStyle.URGENT,
