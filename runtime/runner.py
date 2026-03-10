@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterable
 
+from runtime.components import (
+    CryptoOHLCVSourceComponent,
+    CryptoPriceSourceComponent,
+    ExecutionComponent,
+    MarketPriceSourceComponent,
+    MarketStateComponent,
+    MarketTradeSourceComponent,
+    RuntimeComponent,
+    StrategyComponent,
+)
+from runtime.event_bus import EventBus
 from runtime.indicator_engine import IndicatorEngine
 from runtime.indicator_state import IndicatorState
 from runtime.market_state import MarketState
-from runtime.workers import (
-    crypto_ohlcv_loop,
-    crypto_price_loop,
-    execution_loop,
-    market_price_loop,
-    market_trade_loop,
-    strategy_loop,
-)
-from strategies.strategy import PositionTarget, Strategy
+from runtime.strategy_engine import StrategyEngine
+from strategies.strategy import Strategy
 from streams.crypto_ohlcv_event import CryptoOHLCVEvent
 from streams.crypto_price_event import CryptoPriceEvent
 from streams.market_price_event import MarketPriceEvent
@@ -41,51 +45,57 @@ class Runner:
         self._indicator_state = IndicatorState()
         self._indicator_engine = IndicatorEngine(self._indicator_state)
         self._strategy = strategy
-        self._latest_target: asyncio.Queue[PositionTarget] = asyncio.Queue(maxsize=1)
         self._execution_engine = execution_engine
+        self._strategy_engine = StrategyEngine(
+            market_state=self._market_state,
+            indicator_state=self._indicator_state,
+            execution_engine=self._execution_engine,
+            strategy=self._strategy,
+        )
+        self._bus = EventBus()
 
     async def run(self) -> None:
+        components = self._components()
         async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(
-                market_price_loop(
-                    self._market_price_stream,
-                    self._market_state,
+            for component in components:
+                component.start(tasks)
+
+    def _components(self) -> list[RuntimeComponent]:
+        components: list[RuntimeComponent] = [
+            MarketPriceSourceComponent(
+                stream=self._market_price_stream,
+                bus=self._bus,
+            ),
+            CryptoPriceSourceComponent(
+                stream=self._crypto_price_stream,
+                bus=self._bus,
+            ),
+            MarketStateComponent(
+                bus=self._bus,
+                market_state=self._market_state,
+                indicator_engine=self._indicator_engine,
+            ),
+            ExecutionComponent(
+                bus=self._bus,
+                execution_engine=self._execution_engine,
+            ),
+            StrategyComponent(
+                bus=self._bus,
+                strategy_engine=self._strategy_engine,
+            ),
+        ]
+        if self._market_trade_stream is not None:
+            components.append(
+                MarketTradeSourceComponent(
+                    stream=self._market_trade_stream,
+                    bus=self._bus,
                 )
             )
-            if self._market_trade_stream is not None:
-                tasks.create_task(
-                    market_trade_loop(
-                        self._market_trade_stream,
-                        self._execution_engine,
-                    )
-                )
-            tasks.create_task(
-                crypto_price_loop(
-                    self._crypto_price_stream,
-                    self._market_state,
-                    self._indicator_engine,
+        if self._crypto_ohlcv_stream is not None:
+            components.append(
+                CryptoOHLCVSourceComponent(
+                    stream=self._crypto_ohlcv_stream,
+                    bus=self._bus,
                 )
             )
-            if self._crypto_ohlcv_stream is not None:
-                tasks.create_task(
-                    crypto_ohlcv_loop(
-                        self._crypto_ohlcv_stream,
-                        self._market_state,
-                        self._indicator_engine,
-                    )
-                )
-            tasks.create_task(
-                strategy_loop(
-                    self._market_state,
-                    self._indicator_state,
-                    self._strategy,
-                    self._latest_target,
-                    self._execution_engine,
-                )
-            )
-            tasks.create_task(
-                execution_loop(
-                    self._latest_target,
-                    self._execution_engine,
-                )
-            )
+        return components
