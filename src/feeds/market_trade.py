@@ -3,19 +3,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from time import perf_counter_ns
-from typing import Any, NoReturn, Self
+from typing import Any
 
 import orjson
 from py_clob_client.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from domain.enums import MarketOrderStatus, MarketTradeStatus, Side
-from events.market_order import MarketOrderEvent
-from events.market_trade import MarketTradeEvent
-from infra.env import Env
-from infra.logger import get_logger
-from infra.stats import LatencyStats
+from domain import MarketOrderStatus, MarketTradeStatus, Side
+from events import MarketOrderEvent, MarketTradeEvent
+from infra import Env, LatencyStats, get_logger
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
@@ -23,68 +20,20 @@ _PING_INTERVAL_S = 10
 logger = get_logger("MARKET STREAM")
 
 
-class _EndOfStream:
-    pass
-
-
-_STREAM_ENDED = _EndOfStream()
 type MarketUserEvent = MarketOrderEvent | MarketTradeEvent
-type _QueuedMessage = MarketUserEvent | _EndOfStream
 
 
-class MarketTradeStream(AsyncIterator[MarketUserEvent]):
+class MarketTradeStream:
     def __init__(self, credentials: ApiCreds) -> None:
         self._credentials = credentials
         self._proxy_wallet = Env.POLYMARKET_PROXY_WALLET
-        self._messages: asyncio.Queue[_QueuedMessage] = asyncio.Queue()
-        self._stopping = asyncio.Event()
-        self._stream_task: asyncio.Task[None] | None = None
-        self._stream_error: BaseException | None = None
         self._latency_stats = LatencyStats("market trade parse latency", logger)
 
-    def __aiter__(self) -> Self:
-        self._ensure_stream_task()
-        return self
+    def __aiter__(self) -> AsyncIterator[MarketUserEvent]:
+        return self._stream()
 
-    async def __anext__(self) -> MarketUserEvent:
-        self._ensure_stream_task()
-        event = await self._messages.get()
-        if isinstance(event, _EndOfStream):
-            self._raise_stream_finished()
-        return event
-
-    def _ensure_stream_task(self) -> None:
-        if self._stream_task is None:
-            self._stream_task = asyncio.create_task(self._stream_worker())
-            self._stream_error = None
-
-    def _raise_stream_finished(self) -> NoReturn:
-        if self._stream_error is not None:
-            raise self._stream_error
-        raise StopAsyncIteration
-
-    async def _stream_worker(self) -> None:
-        try:
-            await self._maintain_connection()
-        except asyncio.CancelledError as exc:
-            if not self._stopping.is_set():
-                self._stream_error = exc
-            raise
-        except BaseException as exc:
-            self._stream_error = exc
-            raise
-        finally:
-            self._enqueue(_STREAM_ENDED)
-
-    async def stop(self) -> None:
-        self._stopping.set()
-        if self._stream_task is None:
-            return
-        self._stream_task.cancel()
-        await asyncio.gather(self._stream_task, return_exceptions=True)
-
-    async def _maintain_connection(self) -> None:
-        while not self._stopping.is_set():
+    async def _stream(self) -> AsyncIterator[MarketUserEvent]:
+        while True:
             try:
                 logger.info("connecting market trade websocket")
                 async with connect(
@@ -103,50 +52,45 @@ class MarketTradeStream(AsyncIterator[MarketUserEvent]):
                             if raw == "PONG":
                                 continue
                             started_at_ns = perf_counter_ns() if self._latency_stats.enabled else 0
-                            self._handle_message(raw)
+                            event = self._handle_message(raw)
                             self._latency_stats.record_ns(started_at_ns)
+                            if event is not None:
+                                yield event
                     finally:
                         heartbeat_task.cancel()
                         await asyncio.gather(heartbeat_task, return_exceptions=True)
             except asyncio.CancelledError:
                 raise
             except (ConnectionClosed, ConnectionError, OSError) as e:
-                if self._stopping.is_set():
-                    break
                 logger.error("disconnected market trade websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
 
-    def _handle_message(self, raw: str | bytes) -> None:
+    def _handle_message(self, raw: str | bytes) -> MarketUserEvent | None:
         try:
             message = orjson.loads(raw)
         except (TypeError, orjson.JSONDecodeError):
-            return
+            return None
         if not isinstance(message, dict):
-            return
+            return None
 
         if message.get("event_type") == "order":
             logger.debug("%r", message)
-            order_event = _build_order_event(message)
-            if order_event is not None:
-                self._enqueue(order_event)
+            return _build_order_event(message)
 
         if message.get("event_type") == "trade":
             logger.debug("%r", message)
-            trade_event = _build_trade_event(message, self._proxy_wallet)
-            if trade_event is not None:
-                self._enqueue(trade_event)
+            return _build_trade_event(message, self._proxy_wallet)
+
+        return None
 
     async def _heartbeat(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:
         try:
-            while not self._stopping.is_set():
+            while True:
                 await asyncio.sleep(_PING_INTERVAL_S)
                 async with ws_lock:
                     await ws.send("PING")
         except (ConnectionClosed, asyncio.CancelledError):
             pass
-
-    def _enqueue(self, item: _QueuedMessage) -> None:
-        self._messages.put_nowait(item)
 
 
 async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> None:

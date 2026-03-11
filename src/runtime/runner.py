@@ -3,41 +3,39 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterable
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
-from events.market_price import MarketPriceEvent
-from execution.engine import ExecutionEngine
-from feeds.polymarket_user import MarketUserEvent
-from runtime.components import (
+from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
+from execution import ExecutionEngine
+from feeds import MarketUserEvent
+from runtime import (
     CryptoOHLCVSourceComponent,
     CryptoPriceSourceComponent,
+    EventBus,
     ExecutionComponent,
-    MarketPriceSourceComponent,
+    IndicatorEngine,
+    IndicatorState,
+    MarketQuoteSourceComponent,
+    MarketState,
     MarketStateComponent,
     MarketTradeSourceComponent,
     RuntimeComponent,
     StrategyComponent,
+    StrategyEngine,
 )
-from runtime.event_bus import EventBus
-from runtime.indicator_engine import IndicatorEngine
-from runtime.indicator_state import IndicatorState
-from runtime.market_state import MarketState
-from runtime.strategy_engine import StrategyEngine
-from strategies.strategy import Strategy
+from strategies import Strategy
 
 
 class Runner:
     def __init__(
         self,
         *,
-        market_price_stream: AsyncIterable[MarketPriceEvent],
+        market_quote_stream: AsyncIterable[MarketQuoteEvent],
         market_trade_stream: AsyncIterable[MarketUserEvent] | None = None,
         crypto_price_stream: AsyncIterable[CryptoPriceEvent],
         crypto_ohlcv_stream: AsyncIterable[CryptoOHLCVEvent] | None = None,
         strategy: Strategy,
         execution_engine: ExecutionEngine,
     ) -> None:
-        self._market_price_stream = market_price_stream
+        self._market_quote_stream = market_quote_stream
         self._market_trade_stream = market_trade_stream
         self._crypto_price_stream = crypto_price_stream
         self._crypto_ohlcv_stream = crypto_ohlcv_stream
@@ -62,8 +60,8 @@ class Runner:
 
     def _components(self) -> list[RuntimeComponent]:
         components: list[RuntimeComponent] = [
-            MarketPriceSourceComponent(
-                stream=self._market_price_stream,
+            MarketQuoteSourceComponent(
+                stream=self._market_quote_stream,
                 bus=self._bus,
             ),
             CryptoPriceSourceComponent(

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from indicators.indicator import MacdValue
-from strategies.context import IndicatorLatestState
+from indicators import MacdValue
+from strategies import IndicatorLatestState
 
 
 class IndicatorState:

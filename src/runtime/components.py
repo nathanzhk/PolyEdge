@@ -5,22 +5,26 @@ from collections.abc import AsyncIterable
 from time import perf_counter, perf_counter_ns
 from typing import Protocol
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
-from events.market_order import MarketOrderEvent
-from events.market_price import MarketPriceEvent
-from events.market_trade import MarketTradeEvent
-from events.strategy_trigger import StrategyTriggerEvent
-from execution.engine import ExecutionEngine
-from feeds.polymarket_user import MarketUserEvent
-from infra.logger import get_logger
-from infra.stats import LatencyStats
-from infra.time import now_ts_ms
-from runtime.event_bus import EventBus, OverflowPolicy, Subscription
-from runtime.indicator_engine import IndicatorEngine
-from runtime.market_state import MarketState
-from runtime.strategy_engine import StrategyEngine
-from strategies.target import PositionTarget
+from events import (
+    CryptoOHLCVEvent,
+    CryptoPriceEvent,
+    MarketOrderEvent,
+    MarketQuoteEvent,
+    MarketTradeEvent,
+    StrategyTriggerEvent,
+)
+from execution import ExecutionEngine
+from feeds import MarketUserEvent
+from infra import LatencyStats, get_logger, now_ts_ms
+from runtime import (
+    EventBus,
+    IndicatorEngine,
+    MarketState,
+    OverflowPolicy,
+    StrategyEngine,
+    Subscription,
+)
+from strategies import PositionTarget
 
 logger = get_logger("RUNTIME")
 
@@ -48,7 +52,7 @@ class _StreamSourceComponent[T]:
             await self._bus.publish(event)
 
 
-class MarketPriceSourceComponent(_StreamSourceComponent[MarketPriceEvent]):
+class MarketQuoteSourceComponent(_StreamSourceComponent[MarketQuoteEvent]):
     pass
 
 
@@ -77,9 +81,9 @@ class MarketStateComponent:
         self._indicator_engine = indicator_engine
 
     def start(self, tasks: asyncio.TaskGroup) -> None:
-        market_price_events = self._bus.subscribe(
-            MarketPriceEvent,
-            name="market-state.market-price",
+        market_quote_events = self._bus.subscribe(
+            MarketQuoteEvent,
+            name="market-state.market-quote",
             maxsize=1,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
@@ -96,16 +100,16 @@ class MarketStateComponent:
             overflow=OverflowPolicy.BLOCK,
         )
 
-        tasks.create_task(self._market_price_loop(market_price_events))
+        tasks.create_task(self._market_quote_loop(market_quote_events))
         tasks.create_task(self._crypto_price_loop(crypto_price_events))
         tasks.create_task(self._crypto_ohlcv_loop(crypto_ohlcv_events))
 
-    async def _market_price_loop(self, events: Subscription[MarketPriceEvent]) -> None:
+    async def _market_quote_loop(self, events: Subscription[MarketQuoteEvent]) -> None:
         latency_stats = LatencyStats("market tick", logger)
-        async for price in events:
+        async for quote in events:
             started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
-            await self._market_state.update_market_price(price)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=price.ts_ms, reason="market_price"))
+            await self._market_state.update_market_quote(quote)
+            await self._bus.publish(StrategyTriggerEvent(ts_ms=quote.ts_ms, reason="market_quote"))
             latency_stats.record_ns(started_at_ns)
 
     async def _crypto_price_loop(self, events: Subscription[CryptoPriceEvent]) -> None:

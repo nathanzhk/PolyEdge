@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
-from events.market_price import MarketPriceEvent
-from infra.logger import get_logger
-from markets.base import Market
-from strategies.context import MarketLatestState
+from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
+from infra import get_logger
+from markets import Market
+from strategies import MarketLatestState
 
 logger = get_logger("MARKET STATE")
 
@@ -20,23 +18,23 @@ class MarketState:
         self._market: Market | None = None
         self._beat_price: float | None = None
         self._beat_offset_ms: int | None = None
-        self._market_price: MarketPriceEvent | None = None
+        self._market_quote: MarketQuoteEvent | None = None
         self._crypto_price: CryptoPriceEvent | None = None
         self._crypto_ohlcv: CryptoOHLCVEvent | None = None
 
-    async def update_market_price(self, price: MarketPriceEvent) -> None:
+    async def update_market_quote(self, quote: MarketQuoteEvent) -> None:
         async with self._lock:
-            self._market_price = price
-            if self._market is None or self._market.id != price.market.id:
-                self._market = price.market
+            self._market_quote = quote
+            if self._market is None or self._market.id != quote.market.id:
+                self._market = quote.market
                 self._beat_price = None
                 self._beat_offset_ms = None
         logger.debug(
-            "Market Price -> bid_Yes=%.2f ask_Yes=%.2f bid_No=%.2f ask_No=%.2f",
-            price.bid_yes,
-            price.ask_yes,
-            price.bid_no,
-            price.ask_no,
+            "Market Quote -> bid_Yes=%.2f ask_Yes=%.2f bid_No=%.2f ask_No=%.2f",
+            quote.bid_yes,
+            quote.ask_yes,
+            quote.bid_no,
+            quote.ask_no,
         )
 
     async def update_crypto_price(self, price: CryptoPriceEvent) -> None:
@@ -61,7 +59,7 @@ class MarketState:
             return MarketLatestState(
                 market=self._market,
                 beat_price=self._beat_price,
-                market_price=self._market_price,
+                market_quote=self._market_quote,
                 crypto_price=self._crypto_price,
                 crypto_ohlcv=self._crypto_ohlcv,
             )

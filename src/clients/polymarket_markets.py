@@ -3,8 +3,7 @@ from typing import TypedDict
 import orjson
 import requests
 
-from infra.env import Env
-from infra.logger import get_logger
+from infra import Env, get_logger
 
 logger = get_logger("MARKET API")
 

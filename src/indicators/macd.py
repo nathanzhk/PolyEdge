@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from indicators.indicator import MacdValue
+from indicators import MacdValue
 
 
 @dataclass(slots=True)

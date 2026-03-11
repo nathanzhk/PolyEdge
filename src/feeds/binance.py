@@ -9,12 +9,8 @@ import orjson
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
-from infra.env import Env
-from infra.logger import get_logger
-from infra.stats import LatencyStats, StreamStats
-from infra.time import now_ts_ms
+from events import CryptoOHLCVEvent, CryptoPriceEvent
+from infra import Env, LatencyStats, StreamStats, get_logger, now_ts_ms
 
 _RECONNECT_DELAY_S = 2
 
