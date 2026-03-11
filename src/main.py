@@ -1,16 +1,16 @@
 import asyncio
 import logging
 
+from clients.polymarket_clob import MakerTradeClient, TakerTradeClient
+from execution.engine import ExecutionEngine
+from feeds.binance import CryptoPriceStream
+from feeds.polymarket_price import MarketPriceStream
+from feeds.polymarket_user import MarketTradeStream
+from infra.env import Env
+from infra.logger import configure_logging, get_logger
 from markets.btc import BTC5mMarket
 from runtime.runner import Runner
 from strategies.strategy import DefaultStrategy
-from streams.crypto_stream import CryptoPriceStream
-from streams.market_price_stream import MarketPriceStream
-from streams.market_trade_stream import MarketTradeStream
-from trade.execution_engine import ExecutionEngine
-from trade.trade_client import MakerTradeClient, TakerTradeClient
-from utils.env import Env
-from utils.logger import configure_logging, get_logger
 
 logger = get_logger("MAIN")
 

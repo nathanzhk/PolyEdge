@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from domain.enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
+from infra.time import now_ts_ms
 from markets.base import Market, Token
-from utils.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
-from utils.time import now_ts_ms
 
 TradePurpose = Literal["increase", "reduce"]
 

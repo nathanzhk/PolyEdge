@@ -5,20 +5,20 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
-from markets.base import Token
-from strategies.context import Position, PositionLatestState
-from strategies.target import ExecutionStyle, PositionTarget
-from streams.market_order_event import MarketOrderEvent
-from streams.market_trade_event import MarketTradeEvent
-from trade.managed_order import (
+from clients.polymarket_clob import TradeClient
+from domain.enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
+from events.market_order import MarketOrderEvent
+from events.market_trade import MarketTradeEvent
+from execution.managed_order import (
     ManagedOrder,
     ManagedTrade,
     TradePurpose,
 )
-from trade.trade_client import TradeClient
-from utils.enum import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
-from utils.logger import get_logger
-from utils.time import now_ts_ms
+from infra.logger import get_logger
+from infra.time import now_ts_ms
+from markets.base import Token
+from strategies.context import Position, PositionLatestState
+from strategies.target import ExecutionStyle, PositionTarget
 
 logger = get_logger("TRADE")
 

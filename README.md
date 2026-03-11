@@ -4,8 +4,12 @@ uv run pre-commit install
 ```
 
 ```bash
+PYTHONPATH=src uv run python -m main
+```
+
+```bash
 uv run pre-commit run --all-files
-uv run pre-commit run --files common/time.py
+uv run pre-commit run --files src/infra/time.py
 ```
 
 ```bash

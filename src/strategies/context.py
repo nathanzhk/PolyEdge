@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
+from events.crypto_ohlcv import CryptoOHLCVEvent
+from events.crypto_price import CryptoPriceEvent
+from events.market_price import MarketPriceEvent
 from indicators.indicator import MacdValue
 from markets.base import Market, Token
-from streams.crypto_ohlcv_event import CryptoOHLCVEvent
-from streams.crypto_price_event import CryptoPriceEvent
-from streams.market_price_event import MarketPriceEvent
 
 
 @dataclass(slots=True)

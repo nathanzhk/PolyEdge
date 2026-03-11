@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
+from events.market_price import MarketPriceEvent
+from infra.logger import get_logger
+from infra.time import now_ts_ms
 from markets.base import Market, Token
 from strategies.context import Position, StrategyContext
 from strategies.target import ExecutionStyle, PositionTarget
-from streams.market_price_event import MarketPriceEvent
-from utils.logger import get_logger
-from utils.time import now_ts_ms
 
 logger = get_logger("SUPERMAN")
 
