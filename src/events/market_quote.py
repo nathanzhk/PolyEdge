@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 
-from markets.base import Market
+from markets import Market
 
 
 @dataclass(slots=True, frozen=True)
-class MarketPriceEvent:
+class MarketQuoteEvent:
     ts_ms: int
     market: Market
     bid_yes: float
