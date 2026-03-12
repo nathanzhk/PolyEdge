@@ -4,14 +4,15 @@ from dataclasses import dataclass
 from enum import IntEnum
 
 from events import MarketQuoteEvent
-from infra import get_logger, now_ts_ms
+from infra import now_ts_ms
+from infra.logger import get_logger
 from markets import Market, Token
 from strategies import ExecutionStyle, Position, PositionTarget, StrategyContext
 
 logger = get_logger("SUPERMAN")
 
 
-class PositionStatus(IntEnum):
+class _PositionStatus(IntEnum):
     OBSERVE = 0
     OPENING = 1
     HOLDING = 2
@@ -60,7 +61,7 @@ class SupermanStrategy:
         active_position = self._get_active_position(context.position.positions)
         position_status = self._get_position_status(active_position, elapsed_s)
 
-        if position_status == PositionStatus.OBSERVE:
+        if position_status == _PositionStatus.OBSERVE:
             return self._observe(
                 market,
                 market_quote,
@@ -69,15 +70,15 @@ class SupermanStrategy:
                 curr_btc,
             )
         if active_position is not None:
-            if position_status == PositionStatus.OPENING:
+            if position_status == _PositionStatus.OPENING:
                 return self._opening(
                     market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
-            elif position_status == PositionStatus.HOLDING:
+            elif position_status == _PositionStatus.HOLDING:
                 return self._holding(
                     market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
-            elif position_status == PositionStatus.CLOSING:
+            elif position_status == _PositionStatus.CLOSING:
                 return self._closing(
                     market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
@@ -218,19 +219,19 @@ class SupermanStrategy:
 
         return market.yes_token if btc_diff > 0 else market.no_token
 
-    def _get_position_status(self, position: Position | None, elapsed_s: float) -> PositionStatus:
+    def _get_position_status(self, position: Position | None, elapsed_s: float) -> _PositionStatus:
         if position is None:
             if elapsed_s < self.config.observe_max_sec:
-                return PositionStatus.OBSERVE
+                return _PositionStatus.OBSERVE
             else:
-                return PositionStatus.EXISTED
+                return _PositionStatus.EXISTED
         else:
             if position.opening_shares > 0:
-                return PositionStatus.OPENING
+                return _PositionStatus.OPENING
             elif position.closing_shares > 0:
-                return PositionStatus.CLOSING
+                return _PositionStatus.CLOSING
             else:
-                return PositionStatus.HOLDING
+                return _PositionStatus.HOLDING
 
     def _get_active_position(self, positions: list[Position] | None) -> Position | None:
         if positions is None or len(positions) == 0:

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from strategies import PositionTarget, StrategyContext
+from strategies.context import StrategyContext
+from strategies.target import PositionTarget
 
 
 class Strategy(Protocol):
