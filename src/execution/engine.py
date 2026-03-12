@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Coroutine
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from clients.polymarket_clob import TradeClient
 from domain import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 from events import MarketOrderEvent, MarketTradeEvent
 from execution import (
@@ -12,12 +13,10 @@ from execution import (
     ManagedTrade,
     TradePurpose,
 )
-from infra import get_logger, now_ts_ms
+from infra import now_ts_ms
+from infra.logger import get_logger
 from markets import Token
 from strategies import ExecutionStyle, Position, PositionLatestState, PositionTarget
-
-if TYPE_CHECKING:
-    from clients import TradeClient
 
 logger = get_logger("TRADE")
 
