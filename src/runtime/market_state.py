@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
-from infra import get_logger
+from infra.logger import get_logger
 from markets import Market
 from strategies import MarketLatestState
 

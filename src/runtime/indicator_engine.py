@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from events import CryptoOHLCVEvent, CryptoPriceEvent
-from indicators import MacdIndicator
-from runtime import IndicatorState
+from indicators.macd import MacdIndicator
+from runtime.indicator_state import IndicatorState
 
 
 class IndicatorEngine:

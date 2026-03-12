@@ -12,7 +12,9 @@ from websockets.exceptions import ConnectionClosed
 
 from domain import MarketOrderStatus, MarketTradeStatus, Side
 from events import MarketOrderEvent, MarketTradeEvent
-from infra import Env, LatencyStats, get_logger
+from infra import Env
+from infra.logger import get_logger
+from infra.stats import LatencyStats
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10

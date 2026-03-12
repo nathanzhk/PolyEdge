@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from time import perf_counter_ns
 
-from infra import Env
+from infra.env import Env
 
 NS_PER_S = 1_000_000_000
 NS_PER_MS = 1_000_000

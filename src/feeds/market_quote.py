@@ -10,7 +10,9 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from events import MarketQuoteEvent
-from infra import Env, LatencyStats, StreamStats, get_logger, now_ts_ms, sleep_until
+from infra import Env, now_ts_ms, sleep_until
+from infra.logger import get_logger
+from infra.stats import LatencyStats, StreamStats
 from markets import Market
 
 _SWITCH_BEFORE_END_S = 5

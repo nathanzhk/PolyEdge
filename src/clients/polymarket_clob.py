@@ -16,7 +16,8 @@ from py_clob_client.order_builder.constants import BUY, SELL
 
 from domain import MarketOrderStatus, OrderType, Side
 from execution import MarketOrder
-from infra import Env, get_logger
+from infra import Env
+from infra.logger import get_logger
 from markets import Market, Token
 
 
