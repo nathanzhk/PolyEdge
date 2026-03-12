@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
-from events.market_price import MarketPriceEvent
-from indicators.indicator import MacdValue
-from markets.base import Market, Token
+from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
+from indicators import MacdValue
+from markets import Market, Token
 
 
 @dataclass(slots=True)
@@ -22,7 +20,7 @@ class Position:
 class MarketLatestState:
     market: Market | None
     beat_price: float | None
-    market_price: MarketPriceEvent | None
+    market_quote: MarketQuoteEvent | None
     crypto_price: CryptoPriceEvent | None
     crypto_ohlcv: CryptoOHLCVEvent | None
 

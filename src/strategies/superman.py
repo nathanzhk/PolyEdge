@@ -3,12 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
-from events.market_price import MarketPriceEvent
-from infra.logger import get_logger
-from infra.time import now_ts_ms
-from markets.base import Market, Token
-from strategies.context import Position, StrategyContext
-from strategies.target import ExecutionStyle, PositionTarget
+from events import MarketQuoteEvent
+from infra import get_logger, now_ts_ms
+from markets import Market, Token
+from strategies import ExecutionStyle, Position, PositionTarget, StrategyContext
 
 logger = get_logger("SUPERMAN")
 
@@ -45,9 +43,9 @@ class SupermanStrategy:
         if market is None:
             return None
 
-        market_price = market_status.market_price
+        market_quote = market_status.market_quote
         crypto_price = market_status.crypto_price
-        if market_price is None or crypto_price is None:
+        if market_quote is None or crypto_price is None:
             return None
 
         beat_btc = market_status.beat_price
@@ -65,7 +63,7 @@ class SupermanStrategy:
         if position_status == PositionStatus.OBSERVE:
             return self._observe(
                 market,
-                market_price,
+                market_quote,
                 elapsed_s,
                 beat_btc,
                 curr_btc,
@@ -73,15 +71,15 @@ class SupermanStrategy:
         if active_position is not None:
             if position_status == PositionStatus.OPENING:
                 return self._opening(
-                    market, market_price, active_position, elapsed_s, beat_btc, curr_btc
+                    market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
             elif position_status == PositionStatus.HOLDING:
                 return self._holding(
-                    market, market_price, active_position, elapsed_s, beat_btc, curr_btc
+                    market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
             elif position_status == PositionStatus.CLOSING:
                 return self._closing(
-                    market, market_price, active_position, elapsed_s, beat_btc, curr_btc
+                    market, market_quote, active_position, elapsed_s, beat_btc, curr_btc
                 )
             else:
                 return None
@@ -89,7 +87,7 @@ class SupermanStrategy:
     def _observe(
         self,
         market: Market,
-        mkt_price: MarketPriceEvent,
+        mkt_quote: MarketQuoteEvent,
         elapsed_s: float,
         beat_btc: float,
         curr_btc: float,
@@ -100,7 +98,7 @@ class SupermanStrategy:
             logger.info("no signal")
             return None
 
-        token = self._check_signal(market, beat_btc, curr_btc, mkt_price)
+        token = self._check_signal(market, beat_btc, curr_btc, mkt_quote)
         if token is None:
             return None
 
@@ -109,14 +107,14 @@ class SupermanStrategy:
             market=market,
             token=token,
             shares=self.config.entry_shares,
-            price=_bid_for_token(mkt_price, token),
+            price=_bid_for_token(mkt_quote, token),
             style=ExecutionStyle.PASSIVE,
         )
 
     def _opening(
         self,
         market: Market,
-        mkt_price: MarketPriceEvent,
+        mkt_quote: MarketQuoteEvent,
         position: Position,
         elapsed_s: float,
         beat_btc: float,
@@ -126,13 +124,13 @@ class SupermanStrategy:
             position.holding_open_ts_ms is not None
             and now_ts_ms() - position.holding_open_ts_ms <= 3_000
         ) or elapsed_s <= self.config.observe_max_sec:
-            token = self._check_signal(market, beat_btc, curr_btc, mkt_price)
+            token = self._check_signal(market, beat_btc, curr_btc, mkt_quote)
             if token is not None:
                 return PositionTarget(
                     market=market,
                     token=token,
                     shares=self.config.entry_shares,
-                    price=_bid_for_token(mkt_price, token),
+                    price=_bid_for_token(mkt_quote, token),
                     style=ExecutionStyle.PASSIVE,
                 )
             else:
@@ -155,7 +153,7 @@ class SupermanStrategy:
     def _holding(
         self,
         market: Market,
-        mkt_price: MarketPriceEvent,
+        mkt_quote: MarketQuoteEvent,
         position: Position,
         elapsed_s: float,
         beat_btc: float,
@@ -166,14 +164,14 @@ class SupermanStrategy:
                 market=market,
                 token=position.token,
                 shares=0.0,
-                price=_ask_for_token(mkt_price, position.token),
+                price=_ask_for_token(mkt_quote, position.token),
                 style=ExecutionStyle.PASSIVE,
             )
 
     def _closing(
         self,
         market: Market,
-        mkt_price: MarketPriceEvent,
+        mkt_quote: MarketQuoteEvent,
         position: Position,
         elapsed_s: float,
         beat_btc: float,
@@ -184,7 +182,7 @@ class SupermanStrategy:
                 market=market,
                 token=position.token,
                 shares=0.0,
-                price=_ask_for_token(mkt_price, position.token),
+                price=_ask_for_token(mkt_quote, position.token),
                 style=ExecutionStyle.PASSIVE,
             )
         else:
@@ -192,16 +190,16 @@ class SupermanStrategy:
                 market=market,
                 token=position.token,
                 shares=0.0,
-                price=_ask_for_token(mkt_price, position.token),
+                price=_ask_for_token(mkt_quote, position.token),
                 style=ExecutionStyle.URGENT,
             )
 
     def _check_signal(
-        self, market: Market, btc_base: float, btc_curr: float, mkt_price: MarketPriceEvent
+        self, market: Market, btc_base: float, btc_curr: float, mkt_quote: MarketQuoteEvent
     ) -> Token | None:
         btc_diff = btc_curr - btc_base
         abs_diff = abs(btc_diff)
-        mid_up = (mkt_price.bid_yes + mkt_price.ask_yes) / 2
+        mid_up = (mkt_quote.bid_yes + mkt_quote.ask_yes) / 2
 
         if abs_diff < self.config.min_btc_move:
             logger.debug("skip: btc move %.2f < %.2f", abs_diff, self.config.min_btc_move)
@@ -251,9 +249,9 @@ def _elapsed(market: Market, ts_ms: int) -> float:
     return (ts_ms - market.start_ts_ms) / 1000
 
 
-def _bid_for_token(market_price: MarketPriceEvent, token: Token) -> float:
-    return market_price.bid_yes if token.key == "up" else market_price.bid_no
+def _bid_for_token(market_quote: MarketQuoteEvent, token: Token) -> float:
+    return market_quote.bid_yes if token.key == "up" else market_quote.bid_no
 
 
-def _ask_for_token(market_price: MarketPriceEvent, token: Token) -> float:
-    return market_price.ask_yes if token.key == "up" else market_price.ask_no
+def _ask_for_token(market_quote: MarketQuoteEvent, token: Token) -> float:
+    return market_quote.ask_yes if token.key == "up" else market_quote.ask_no

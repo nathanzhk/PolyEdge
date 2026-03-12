@@ -1,16 +1,13 @@
 import asyncio
 import logging
 
-from clients.polymarket_clob import MakerTradeClient, TakerTradeClient
-from execution.engine import ExecutionEngine
-from feeds.binance import CryptoPriceStream
-from feeds.polymarket_price import MarketPriceStream
-from feeds.polymarket_user import MarketTradeStream
-from infra.env import Env
-from infra.logger import configure_logging, get_logger
-from markets.btc import BTC5mMarket
-from runtime.runner import Runner
-from strategies.strategy import DefaultStrategy
+from clients import MakerTradeClient, TakerTradeClient
+from execution import ExecutionEngine
+from feeds import CryptoPriceStream, MarketQuoteStream, MarketTradeStream
+from infra import Env, configure_logging, get_logger
+from markets import BTC5mMarket
+from runtime import Runner
+from strategies import DefaultStrategy
 
 logger = get_logger("MAIN")
 
@@ -27,9 +24,9 @@ async def run() -> None:
     taker = await asyncio.to_thread(TakerTradeClient)
     logger.info("trade clients initialized")
 
-    logger.info("starting market price, market trade, and crypto price streams")
+    logger.info("starting market quote, market trade, and crypto price streams")
     runner = Runner(
-        market_price_stream=MarketPriceStream(BTC5mMarket, interval_ms=10),
+        market_quote_stream=MarketQuoteStream(BTC5mMarket, interval_ms=10),
         market_trade_stream=MarketTradeStream(maker.get_credentials()),
         crypto_price_stream=CryptoPriceStream("btcusdt", interval_ms=10),
         strategy=DefaultStrategy(),

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from markets.base import Market, Token
+from markets import Market, Token
 
 
 class ExecutionStyle(StrEnum):
