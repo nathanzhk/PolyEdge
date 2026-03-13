@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from markets import Market
+from markets.base import Market
 
 
 @dataclass(slots=True, frozen=True)
