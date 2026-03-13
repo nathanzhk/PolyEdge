@@ -10,9 +10,10 @@ from py_clob_client.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from domain import MarketOrderStatus, MarketTradeStatus, Side
-from events import MarketOrderEvent, MarketTradeEvent
-from infra import Env
+from domain.enums import MarketOrderStatus, MarketTradeStatus, Side
+from events.market_order import MarketOrderEvent
+from events.market_trade import MarketTradeEvent
+from infra.env import Env
 from infra.logger import get_logger
 from infra.stats import LatencyStats
 

@@ -5,19 +5,17 @@ from collections.abc import AsyncIterable
 from time import perf_counter, perf_counter_ns
 from typing import Protocol
 
-from events import (
-    CryptoOHLCVEvent,
-    CryptoPriceEvent,
-    MarketOrderEvent,
-    MarketQuoteEvent,
-    MarketTradeEvent,
-    StrategyTriggerEvent,
-)
+from events.crypto_ohlcv import CryptoOHLCVEvent
+from events.crypto_price import CryptoPriceEvent
+from events.market_order import MarketOrderEvent
+from events.market_quote import MarketQuoteEvent
+from events.market_trade import MarketTradeEvent
+from events.strategy_trigger import StrategyTriggerEvent
 from execution.engine import ExecutionEngine
 from feeds.market_trade import MarketUserEvent
-from infra import now_ts_ms
 from infra.logger import get_logger
 from infra.stats import LatencyStats
+from infra.time import now_ts_ms
 from runtime.event_bus import (
     EventBus,
     OverflowPolicy,
@@ -26,7 +24,7 @@ from runtime.event_bus import (
 from runtime.indicator_engine import IndicatorEngine
 from runtime.market_state import MarketState
 from runtime.strategy_engine import StrategyEngine
-from strategies import PositionTarget
+from strategies.target import PositionTarget
 
 logger = get_logger("RUNTIME")
 

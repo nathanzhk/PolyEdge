@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import requests
 
-from infra import Env
+from infra.env import Env
 
 
 def fetch_ohlcv(

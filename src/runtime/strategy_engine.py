@@ -3,7 +3,9 @@ from __future__ import annotations
 from execution.engine import ExecutionEngine
 from runtime.indicator_state import IndicatorState
 from runtime.market_state import MarketState
-from strategies import PositionTarget, Strategy, StrategyContext
+from strategies.context import StrategyContext
+from strategies.strategy import Strategy
+from strategies.target import PositionTarget
 
 
 class StrategyEngine:

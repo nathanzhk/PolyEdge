@@ -1,6 +1,7 @@
 import requests
 
-from infra import Env, fmt_ts_ms
+from infra.env import Env
+from infra.time import fmt_ts_ms
 
 
 def send_trade(market_start_ms, market_end_ms, side, token, shares, price, amount=None, pnl=None):

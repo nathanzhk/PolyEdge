@@ -6,8 +6,8 @@ from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener
 from pathlib import Path
 
-from infra import fmt_ts_s
 from infra.env import Env
+from infra.time import fmt_ts_s
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"

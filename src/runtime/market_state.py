@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
-from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
+from events.crypto_ohlcv import CryptoOHLCVEvent
+from events.crypto_price import CryptoPriceEvent
+from events.market_quote import MarketQuoteEvent
 from infra.logger import get_logger
-from markets import Market
-from strategies import MarketLatestState
+from markets.base import Market
+from strategies.context import MarketLatestState
 
 logger = get_logger("MARKET STATE")
 

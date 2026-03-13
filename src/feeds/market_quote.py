@@ -9,11 +9,12 @@ import orjson
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from events import MarketQuoteEvent
-from infra import Env, now_ts_ms, sleep_until
+from events.market_quote import MarketQuoteEvent
+from infra.env import Env
 from infra.logger import get_logger
 from infra.stats import LatencyStats, StreamStats
-from markets import Market
+from infra.time import now_ts_ms, sleep_until
+from markets.base import Market
 
 _SWITCH_BEFORE_END_S = 5
 _ACTIVATE_BEFORE_MS = 2_000

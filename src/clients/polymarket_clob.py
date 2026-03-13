@@ -14,11 +14,11 @@ from py_clob_client.clob_types import (
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
-from domain import MarketOrderStatus, OrderType, Side
-from execution import MarketOrder
-from infra import Env
+from domain.enums import MarketOrderStatus, OrderType, Side
+from execution.order_snapshot import MarketOrder
+from infra.env import Env
 from infra.logger import get_logger
-from markets import Market, Token
+from markets.base import Market, Token
 
 
 class _Role(StrEnum):

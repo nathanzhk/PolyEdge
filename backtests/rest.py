@@ -6,7 +6,8 @@ import time
 
 import requests
 
-from infra import Env, iso_to_ms
+from infra.env import Env
+from infra.time import iso_to_ms
 
 _remaining = -1  # X-RateLimit-Remaining from last response
 

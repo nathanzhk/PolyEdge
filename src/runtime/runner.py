@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterable
 
-from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
+from events.crypto_ohlcv import CryptoOHLCVEvent
+from events.crypto_price import CryptoPriceEvent
+from events.market_quote import MarketQuoteEvent
 from execution.engine import ExecutionEngine
 from feeds.market_trade import MarketUserEvent
 from runtime.components import (
@@ -21,7 +23,7 @@ from runtime.indicator_engine import IndicatorEngine
 from runtime.indicator_state import IndicatorState
 from runtime.market_state import MarketState
 from runtime.strategy_engine import StrategyEngine
-from strategies import Strategy
+from strategies.strategy import Strategy
 
 
 class Runner:
