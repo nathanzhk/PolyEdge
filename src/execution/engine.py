@@ -6,17 +6,19 @@ from collections.abc import Coroutine
 from typing import Any
 
 from clients.polymarket_clob import TradeClient
-from domain import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
-from events import MarketOrderEvent, MarketTradeEvent
-from execution import (
+from domain.enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
+from events.market_order import MarketOrderEvent
+from events.market_trade import MarketTradeEvent
+from execution.managed_order import (
     ManagedOrder,
     ManagedTrade,
     TradePurpose,
 )
-from infra import now_ts_ms
 from infra.logger import get_logger
-from markets import Token
-from strategies import ExecutionStyle, Position, PositionLatestState, PositionTarget
+from infra.time import now_ts_ms
+from markets.base import Token
+from strategies.context import Position, PositionLatestState
+from strategies.target import ExecutionStyle, PositionTarget
 
 logger = get_logger("TRADE")
 

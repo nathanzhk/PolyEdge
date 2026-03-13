@@ -6,7 +6,7 @@ from execution.engine import ExecutionEngine
 from feeds.binance import CryptoPriceStream
 from feeds.market_quote import MarketQuoteStream
 from feeds.market_trade import MarketTradeStream
-from infra import Env
+from infra.env import Env
 from infra.logger import configure_logging, get_logger
 from markets.btc import BTC5mMarket
 from runtime.runner import Runner

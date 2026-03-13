@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 
-from events import CryptoOHLCVEvent, CryptoPriceEvent, MarketQuoteEvent
-from indicators import MacdValue
-from markets import Market, Token
+from events.crypto_ohlcv import CryptoOHLCVEvent
+from events.crypto_price import CryptoPriceEvent
+from events.market_quote import MarketQuoteEvent
+from indicators.indicator import MacdValue
+from markets.base import Market, Token
 
 
 @dataclass(slots=True)

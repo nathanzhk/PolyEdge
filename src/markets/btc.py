@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar, Self
 
-from clients import get_market_by_slug
-from infra import current_5m_window_s, current_15m_window_s
-from markets import Market, Token
+from clients.polymarket_markets import get_market_by_slug
+from infra.time import current_5m_window_s, current_15m_window_s
+from markets.base import Market, Token
 
 UP_OUTCOME = "Up"
 DOWN_OUTCOME = "Down"
