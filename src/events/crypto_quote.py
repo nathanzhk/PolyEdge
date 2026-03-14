@@ -6,7 +6,7 @@ from infra.time import now_ts_ms
 
 @dataclass(slots=True, frozen=True)
 class CryptoQuoteEvent:
-    exch_ut_id: int  # binance event update id
+    exch_ut_id: int
     symbol: str
     best_bid: float
     best_ask: float

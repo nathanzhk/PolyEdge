@@ -6,7 +6,7 @@ from infra.time import now_ts_ms
 
 @dataclass(slots=True, frozen=True)
 class CryptoOHLCVEvent:
-    exch_ts_ms: int  # binance event timestamp
+    exch_ts_ms: int
     symbol: str
     start_ts_ms: int
     close_ts_ms: int

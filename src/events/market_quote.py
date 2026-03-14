@@ -7,7 +7,7 @@ from markets.base import Market, Token
 
 @dataclass(slots=True, frozen=True)
 class MarketQuoteEvent:
-    exch_ts_ms: int  # polymarket event timestamp
+    exch_ts_ms: int
     market: Market
     token: Token
     best_bid: float
