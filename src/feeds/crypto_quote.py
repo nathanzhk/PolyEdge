@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+
+import orjson
+from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
+
+from events.crypto_quote import CryptoQuoteEvent
+from infra.env import Env
+from infra.logger import get_logger
+
+_RECONNECT_DELAY_S = 2
+
+logger = get_logger("CRYPTO QUOTE")
+
+
+class CryptoQuoteStream:
+    def __init__(self, symbol: str) -> None:
+        if symbol is None or symbol.strip() == "":
+            raise ValueError("cannot load current symbol")
+        self._symbol = symbol.strip().lower()
+        self._ws_url = f"{Env.BINANCE_WS_BASE_URL}/{self._symbol}@bookTicker"
+
+    def __aiter__(self) -> AsyncIterator[CryptoQuoteEvent]:
+        return self._stream()
+
+    async def _stream(self) -> AsyncIterator[CryptoQuoteEvent]:
+        while True:
+            try:
+                logger.info("connecting crypto quote websocket")
+                async with connect(
+                    self._ws_url,
+                    ping_interval=20,
+                    ping_timeout=5,
+                    max_queue=2048,
+                    max_size=None,
+                ) as ws:
+                    logger.info("connected crypto quote websocket")
+                    async for raw in ws:
+                        try:
+                            message = orjson.loads(raw)
+                        except Exception:
+                            continue
+                        if not isinstance(message, dict):
+                            continue
+                        event = self._build_event(message)
+                        if event is not None:
+                            yield event
+            except (ConnectionClosed, ConnectionError, OSError) as e:
+                logger.error("disconnected crypto quote websocket: %s", e)
+                await asyncio.sleep(_RECONNECT_DELAY_S)
+
+    def _build_event(self, message: dict) -> CryptoQuoteEvent | None:
+        try:
+            ud_id = int(message["u"])
+            symbol = str(message["s"]).lower()
+            best_bid = float(message["b"])
+            best_ask = float(message["a"])
+        except Exception:
+            return None
+
+        if symbol != self._symbol:
+            return None
+
+        return CryptoQuoteEvent(
+            exch_ut_id=ud_id,
+            symbol=symbol,
+            best_bid=round(best_bid, 3),
+            best_ask=round(best_ask, 3),
+        )

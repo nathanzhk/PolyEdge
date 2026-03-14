@@ -74,7 +74,7 @@ class MarketQuoteStream:
 
     def _build_event(self, message: dict) -> MarketQuoteEvent | None:
         try:
-            event_ts_ms = int(message["timestamp"])
+            ts_ms = int(message["timestamp"])
             market_id = message["market"]
             token_id = message["asset_id"]
             best_bid = float(message["best_bid"])
@@ -93,7 +93,7 @@ class MarketQuoteStream:
             return None
 
         return MarketQuoteEvent(
-            event_ts_ms=event_ts_ms,
+            exch_ts_ms=ts_ms,
             market=self._market,
             token=token,
             best_bid=round(best_bid, 3),
