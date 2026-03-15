@@ -6,13 +6,12 @@ from time import perf_counter, perf_counter_ns
 from typing import Protocol
 
 from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
+from events.crypto_quote import CryptoQuoteEvent
 from events.market_order import MarketOrderEvent
 from events.market_quote import MarketQuoteEvent
 from events.market_trade import MarketTradeEvent
 from events.strategy_trigger import StrategyTriggerEvent
 from execution.engine import ExecutionEngine
-from feeds.market_trade import MarketUserEvent
 from infra.logger import get_logger
 from infra.stats import LatencyStats
 from infra.time import now_ts_ms
@@ -56,11 +55,11 @@ class MarketQuoteSourceComponent(_StreamSourceComponent[MarketQuoteEvent]):
     pass
 
 
-class CryptoPriceSourceComponent(_StreamSourceComponent[CryptoPriceEvent]):
+class CryptoQuoteSourceComponent(_StreamSourceComponent[CryptoQuoteEvent]):
     pass
 
 
-class MarketTradeSourceComponent(_StreamSourceComponent[MarketUserEvent]):
+class MarketTradeSourceComponent(_StreamSourceComponent[MarketOrderEvent | MarketTradeEvent]):
     pass
 
 
@@ -87,9 +86,9 @@ class MarketStateComponent:
             maxsize=1,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
-        crypto_price_events = self._bus.subscribe(
-            CryptoPriceEvent,
-            name="market-state.crypto-price",
+        crypto_quote_events = self._bus.subscribe(
+            CryptoQuoteEvent,
+            name="market-state.crypto-quote",
             maxsize=1,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
@@ -101,7 +100,7 @@ class MarketStateComponent:
         )
 
         tasks.create_task(self._market_quote_loop(market_quote_events))
-        tasks.create_task(self._crypto_price_loop(crypto_price_events))
+        tasks.create_task(self._crypto_quote_loop(crypto_quote_events))
         tasks.create_task(self._crypto_ohlcv_loop(crypto_ohlcv_events))
 
     async def _market_quote_loop(self, events: Subscription[MarketQuoteEvent]) -> None:
@@ -112,13 +111,13 @@ class MarketStateComponent:
             await self._bus.publish(StrategyTriggerEvent(ts_ms=quote.ts_ms, reason="market_quote"))
             latency_stats.record_ns(started_at_ns)
 
-    async def _crypto_price_loop(self, events: Subscription[CryptoPriceEvent]) -> None:
+    async def _crypto_quote_loop(self, events: Subscription[CryptoQuoteEvent]) -> None:
         latency_stats = LatencyStats("crypto tick", logger)
-        async for price in events:
+        async for quote in events:
             started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
-            await self._market_state.update_crypto_price(price)
-            await self._indicator_engine.on_crypto_price(price)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=price.ts_ms, reason="crypto_price"))
+            await self._market_state.update_crypto_quote(quote)
+            await self._indicator_engine.on_crypto_quote(quote)
+            await self._bus.publish(StrategyTriggerEvent(ts_ms=quote.ts_ms, reason="crypto_quote"))
             latency_stats.record_ns(started_at_ns)
 
     async def _crypto_ohlcv_loop(self, events: Subscription[CryptoOHLCVEvent]) -> None:

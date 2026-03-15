@@ -4,13 +4,14 @@ import asyncio
 from collections.abc import AsyncIterable
 
 from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
+from events.crypto_quote import CryptoQuoteEvent
+from events.market_order import MarketOrderEvent
 from events.market_quote import MarketQuoteEvent
+from events.market_trade import MarketTradeEvent
 from execution.engine import ExecutionEngine
-from feeds.market_trade import MarketUserEvent
 from runtime.components import (
     CryptoOHLCVSourceComponent,
-    CryptoPriceSourceComponent,
+    CryptoQuoteSourceComponent,
     ExecutionComponent,
     MarketQuoteSourceComponent,
     MarketStateComponent,
@@ -31,15 +32,15 @@ class Runner:
         self,
         *,
         market_quote_stream: AsyncIterable[MarketQuoteEvent],
-        market_trade_stream: AsyncIterable[MarketUserEvent] | None = None,
-        crypto_price_stream: AsyncIterable[CryptoPriceEvent],
+        market_trade_stream: AsyncIterable[MarketOrderEvent | MarketTradeEvent] | None = None,
+        crypto_quote_stream: AsyncIterable[CryptoQuoteEvent],
         crypto_ohlcv_stream: AsyncIterable[CryptoOHLCVEvent] | None = None,
         strategy: Strategy,
         execution_engine: ExecutionEngine,
     ) -> None:
         self._market_quote_stream = market_quote_stream
         self._market_trade_stream = market_trade_stream
-        self._crypto_price_stream = crypto_price_stream
+        self._crypto_quote_stream = crypto_quote_stream
         self._crypto_ohlcv_stream = crypto_ohlcv_stream
         self._market_state = MarketState()
         self._indicator_state = IndicatorState()
@@ -66,8 +67,8 @@ class Runner:
                 stream=self._market_quote_stream,
                 bus=self._bus,
             ),
-            CryptoPriceSourceComponent(
-                stream=self._crypto_price_stream,
+            CryptoQuoteSourceComponent(
+                stream=self._crypto_quote_stream,
                 bus=self._bus,
             ),
             MarketStateComponent(

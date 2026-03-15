@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
+from events.crypto_quote import CryptoQuoteEvent
 from indicators.macd import MacdIndicator
 from runtime.indicator_state import IndicatorState
 
@@ -11,7 +11,7 @@ class IndicatorEngine:
         self._state = state
         self._crypto_macd = MacdIndicator()
 
-    async def on_crypto_price(self, event: CryptoPriceEvent) -> None:
+    async def on_crypto_quote(self, event: CryptoQuoteEvent) -> None:
         return None
 
     async def on_crypto_ohlcv(self, event: CryptoOHLCVEvent) -> None:
