@@ -6,6 +6,11 @@ class Side(StrEnum):
     SELL = "SELL"
 
 
+class Role(StrEnum):
+    MAKER = "MAKER"
+    TAKER = "TAKER"
+
+
 class OrderType(StrEnum):
     GTC = "GTC"
     GTD = "GTD"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from time import perf_counter_ns
 from typing import Any
 
 import orjson
@@ -10,32 +9,27 @@ from py_clob_client.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from domain.enums import MarketOrderStatus, MarketTradeStatus, Side
+from domain.enums import MarketOrderStatus, MarketTradeStatus, OrderType, Role, Side
 from events.market_order import MarketOrderEvent
 from events.market_trade import MarketTradeEvent
 from infra.env import Env
 from infra.logger import get_logger
-from infra.stats import LatencyStats
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
 
-logger = get_logger("MARKET STREAM")
-
-
-type MarketUserEvent = MarketOrderEvent | MarketTradeEvent
+logger = get_logger("MARKET TRADE")
 
 
 class MarketTradeStream:
     def __init__(self, credentials: ApiCreds) -> None:
         self._credentials = credentials
         self._proxy_wallet = Env.POLYMARKET_PROXY_WALLET
-        self._latency_stats = LatencyStats("market trade parse latency", logger)
 
-    def __aiter__(self) -> AsyncIterator[MarketUserEvent]:
+    def __aiter__(self) -> AsyncIterator[MarketOrderEvent | MarketTradeEvent]:
         return self._stream()
 
-    async def _stream(self) -> AsyncIterator[MarketUserEvent]:
+    async def _stream(self) -> AsyncIterator[MarketOrderEvent | MarketTradeEvent]:
         while True:
             try:
                 logger.info("connecting market trade websocket")
@@ -54,11 +48,21 @@ class MarketTradeStream:
                         async for raw in ws:
                             if raw == "PONG":
                                 continue
-                            started_at_ns = perf_counter_ns() if self._latency_stats.enabled else 0
-                            event = self._handle_message(raw)
-                            self._latency_stats.record_ns(started_at_ns)
-                            if event is not None:
-                                yield event
+                            try:
+                                message = orjson.loads(raw)
+                            except Exception:
+                                continue
+                            if not isinstance(message, dict):
+                                continue
+                            event_type = message.get("event_type")
+                            if event_type == "order":
+                                event = _build_order_event(message)
+                                if event is not None:
+                                    yield event
+                            elif event_type == "trade":
+                                event = _build_trade_event(message, self._proxy_wallet)
+                                if event is not None:
+                                    yield event
                     finally:
                         heartbeat_task.cancel()
                         await asyncio.gather(heartbeat_task, return_exceptions=True)
@@ -67,24 +71,6 @@ class MarketTradeStream:
             except (ConnectionClosed, ConnectionError, OSError) as e:
                 logger.error("disconnected market trade websocket: %s", e)
                 await asyncio.sleep(_RECONNECT_DELAY_S)
-
-    def _handle_message(self, raw: str | bytes) -> MarketUserEvent | None:
-        try:
-            message = orjson.loads(raw)
-        except (TypeError, orjson.JSONDecodeError):
-            return None
-        if not isinstance(message, dict):
-            return None
-
-        if message.get("event_type") == "order":
-            logger.debug("%r", message)
-            return _build_order_event(message)
-
-        if message.get("event_type") == "trade":
-            logger.debug("%r", message)
-            return _build_trade_event(message, self._proxy_wallet)
-
-        return None
 
     async def _heartbeat(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:
         try:
@@ -96,73 +82,57 @@ class MarketTradeStream:
             pass
 
 
-async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> None:
-    await ws.send(
-        orjson.dumps(
-            {
-                "auth": {
-                    "apiKey": credentials.api_key,
-                    "secret": credentials.api_secret,
-                    "passphrase": credentials.api_passphrase,
-                },
-                "type": "user",
-            }
-        ).decode("utf-8")
-    )
-
-
-def _build_order_event(data: dict[str, Any]) -> MarketOrderEvent | None:
+def _build_order_event(message: dict) -> MarketOrderEvent | None:
     try:
-        trade_ids = data.get("associate_trades") or []
+        trade_ids = message["associate_trades"]
         return MarketOrderEvent(
-            ts_ms=int(data["timestamp"]),
-            market_id=str(data["market"]),
-            token_id=str(data["asset_id"]),
-            order_id=str(data["id"]),
+            exch_ts_ms=int(message["timestamp"]),
+            market_id=message["market"],
+            token_id=message["asset_id"],
+            order_id=message["id"],
             trade_ids=trade_ids if isinstance(trade_ids, list) else [],
-            side=Side(data["side"]),
-            status=MarketOrderStatus(str(data["status"])),
-            ordered_shares=round(float(data["original_size"]), 6),
-            matched_shares=round(float(data["size_matched"]), 6),
+            status=MarketOrderStatus(str(message["status"]).upper()),
+            ordered_shares=round(float(message["original_size"]), 6),
+            matched_shares=round(float(message["size_matched"]), 6),
+            side=Side(str(message["side"]).upper()),
+            type=OrderType(str(message["order_type"]).upper()),
+            price=round(float(message["price"]), 3),
         )
-    except (KeyError, TypeError, ValueError):
+    except Exception:
         return None
 
 
-def _build_trade_event(data: dict[str, Any], proxy_wallet: str) -> MarketTradeEvent | None:
+def _build_trade_event(message: dict, proxy_wallet: str) -> MarketTradeEvent | None:
     try:
-        if _same_address(data.get("maker_address"), proxy_wallet):
-            token_id = str(data["asset_id"])
-            order_id = str(data["taker_order_id"])
-            shares = float(data["size"])
-            side = Side(str(data["side"]))
-            price = float(data["price"])
+        if str(message.get("maker_address")).lower() == proxy_wallet.lower():
+            token_id = message["asset_id"]
+            order_id = message["taker_order_id"]
+            shares = float(message["size"])
+            side = Side(str(message["side"]).upper())
+            price = float(message["price"])
         else:
-            sub_order = _find_sub_order(data.get("maker_orders"), proxy_wallet)
+            sub_order = _find_sub_order(message.get("maker_orders"), proxy_wallet)
             if sub_order is None:
                 return None
-            token_id = str(sub_order["asset_id"])
-            order_id = str(sub_order["order_id"])
+            token_id = sub_order["asset_id"]
+            order_id = sub_order["order_id"]
             shares = float(sub_order["matched_amount"])
-            side = Side(str(sub_order["side"]))
+            side = Side(str(sub_order["side"]).upper())
             price = float(sub_order["price"])
         return MarketTradeEvent(
-            ts_ms=int(data["timestamp"]),
-            market_id=str(data["market"]),
+            exch_ts_ms=int(message["timestamp"]),
+            market_id=message["market"],
             token_id=token_id,
             order_id=order_id,
-            trade_id=str(data["id"]),
-            side=side,
-            status=MarketTradeStatus(str(data["status"])),
+            trade_id=message["id"],
+            status=MarketTradeStatus(str(message["status"]).upper()),
             shares=round(shares, 6),
+            side=side,
+            role=Role(str(message["trader_side"]).upper()),
             price=round(price, 3),
         )
-    except (KeyError, TypeError, ValueError):
+    except Exception:
         return None
-
-
-def _same_address(left: object, right: str) -> bool:
-    return isinstance(left, str) and left.lower() == right.lower()
 
 
 def _find_sub_order(sub_orders: object, proxy_wallet: str) -> dict[str, Any] | None:
@@ -171,6 +141,18 @@ def _find_sub_order(sub_orders: object, proxy_wallet: str) -> dict[str, Any] | N
     for sub_order in sub_orders:
         if not isinstance(sub_order, dict):
             continue
-        if _same_address(sub_order.get("maker_address"), proxy_wallet):
+        if str(sub_order.get("maker_address")).lower() == proxy_wallet.lower():
             return sub_order
     return None
+
+
+async def _initial_subscribe(ws: ClientConnection, credentials: ApiCreds) -> None:
+    payload = {
+        "type": "user",
+        "auth": {
+            "apiKey": credentials.api_key,
+            "secret": credentials.api_secret,
+            "passphrase": credentials.api_passphrase,
+        },
+    }
+    await ws.send(orjson.dumps(payload).decode())
