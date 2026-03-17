@@ -456,7 +456,7 @@ class ExecutionEngine:
                 return
 
             order.updated_ts_ms = max(order.updated_ts_ms, event.ts_ms)
-            if event.cancelled:
+            if event.is_canceled:
                 order.off_chain_pending_shares = ZERO
                 order.off_chain_matched_shares = event.matched_shares
                 order.off_chain_invalid_shares = event.pending_shares
