@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from indicators.indicator import MacdValue
-from strategies.context import IndicatorLatestState
+from state.context import IndicatorLatestState
 
 
 class IndicatorState:
