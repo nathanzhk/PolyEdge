@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_price import CryptoPriceEvent
+from events.crypto_quote import CryptoQuoteEvent
 from events.market_quote import MarketQuoteEvent
 from indicators.indicator import MacdValue
 from markets.base import Market, Token
@@ -23,7 +23,7 @@ class MarketLatestState:
     market: Market | None
     beat_price: float | None
     market_quote: MarketQuoteEvent | None
-    crypto_price: CryptoPriceEvent | None
+    crypto_quote: CryptoQuoteEvent | None
     crypto_ohlcv: CryptoOHLCVEvent | None
 
 

@@ -46,12 +46,12 @@ class SupermanStrategy:
             return None
 
         market_quote = market_status.market_quote
-        crypto_price = market_status.crypto_price
-        if market_quote is None or crypto_price is None:
+        crypto_quote = market_status.crypto_quote
+        if market_quote is None or crypto_quote is None:
             return None
 
         beat_btc = market_status.beat_price
-        curr_btc = crypto_price.price
+        curr_btc = crypto_quote.mid
 
         if beat_btc is None or curr_btc is None:
             return None
