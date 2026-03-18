@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from strategies.context import StrategyContext
 from strategies.target import PositionTarget
+
+from state.context import StrategyContext
 
 
 class Strategy(Protocol):
