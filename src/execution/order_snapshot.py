@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from domain.enums import MarketOrderStatus, OrderType, Side
+from enums import MarketOrderStatus, OrderType, Side
 
 
 @dataclass(slots=True, frozen=True)

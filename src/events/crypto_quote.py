@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from time import perf_counter_ns
 
-from infra.time import now_ts_ms
+from utils.time import now_ts_ms
 
 
 @dataclass(slots=True, frozen=True)

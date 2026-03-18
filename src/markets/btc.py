@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import ClassVar, Self
 
 from clients.polymarket_markets import get_market_by_slug
-from infra.time import current_5m_window_s, current_15m_window_s
 from markets.base import Market, Token
+from utils.time import current_5m_window_s, current_15m_window_s
 
 UP_OUTCOME = "Up"
 DOWN_OUTCOME = "Down"

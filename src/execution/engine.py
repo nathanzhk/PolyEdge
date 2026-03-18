@@ -5,8 +5,10 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
+from strategies.target import ExecutionStyle, PositionTarget
+
 from clients.polymarket_clob import TradeClient
-from domain.enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
+from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
 from events.market_order import MarketOrderEvent
 from events.market_trade import MarketTradeEvent
 from execution.managed_order import (
@@ -14,11 +16,10 @@ from execution.managed_order import (
     ManagedTrade,
     TradePurpose,
 )
-from infra.logger import get_logger
-from infra.time import now_ts_ms
 from markets.base import Token
-from strategies.context import Position, PositionLatestState
-from strategies.target import ExecutionStyle, PositionTarget
+from state.context import Position, PositionLatestState
+from utils.logger import get_logger
+from utils.time import now_ts_ms
 
 logger = get_logger("TRADE")
 

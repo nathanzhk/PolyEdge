@@ -9,7 +9,7 @@ PYTHONPATH=src uv run python -m main
 
 ```bash
 uv run pre-commit run --all-files
-uv run pre-commit run --files src/infra/time.py
+uv run pre-commit run --files src/utils/time.py
 ```
 
 ```bash

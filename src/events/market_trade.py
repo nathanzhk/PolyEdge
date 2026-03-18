@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from time import perf_counter_ns
 
-from domain.enums import MarketTradeStatus, Role, Side
-from infra.time import now_ts_ms
+from enums import MarketTradeStatus, Role, Side
+from utils.time import now_ts_ms
 
 
 @dataclass(slots=True, frozen=True)
