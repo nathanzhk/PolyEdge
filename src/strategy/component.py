@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import asyncio
 from time import perf_counter
-
-from strategies.strategy_engine import StrategyEngine
+from typing import TYPE_CHECKING
 
 from event_bus import (
     EventBus,
     OverflowPolicy,
     Subscription,
 )
-from events.strategy_trigger import StrategyTriggerEvent
-from registry import ComponentFactory
+from events import RuntimeStateEvent
+from strategy.engine import StrategyEngine
 from utils.logger import get_logger
 from utils.time import now_ts_ms
+
+if TYPE_CHECKING:
+    from app import ComponentFactory
 
 logger = get_logger("RUNTIME")
 
@@ -34,7 +36,7 @@ class StrategyComponent:
 
     def start(self, tasks: asyncio.TaskGroup) -> None:
         triggers = self._bus.subscribe(
-            StrategyTriggerEvent,
+            RuntimeStateEvent,
             name="strategy.triggers",
             maxsize=1,
             overflow=OverflowPolicy.DROP_OLDEST,
@@ -46,9 +48,9 @@ class StrategyComponent:
     async def _timer_loop(self) -> None:
         while True:
             await asyncio.sleep(self._timer_interval_s)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=now_ts_ms(), reason="timer"))
+            await self._bus.publish(RuntimeStateEvent(ts_ms=now_ts_ms(), reason="timer"))
 
-    async def _strategy_loop(self, triggers: Subscription[StrategyTriggerEvent]) -> None:
+    async def _strategy_loop(self, triggers: Subscription[RuntimeStateEvent]) -> None:
         next_allowed_at = 0.0
         async for _ in triggers:
             now = perf_counter()
@@ -65,7 +67,7 @@ class StrategyComponent:
 
 
 def strategy_component() -> ComponentFactory:
-    return lambda ctx: StrategyComponent(
-        bus=ctx.bus,
-        strategy_engine=ctx.strategy_engine,
+    return lambda context: StrategyComponent(
+        bus=context.bus,
+        strategy_engine=context.strategy_engine,
     )

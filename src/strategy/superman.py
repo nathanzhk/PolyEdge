@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
-from strategies.target import ExecutionStyle, PositionTarget
-
-from events.market_quote import MarketQuoteEvent
-from markets.base import Market, Token
 from state.context import Position, StrategyContext
+
+from events import DesiredPositionEvent, ExecutionStyle, MarketQuoteEvent
+from markets.base import Market, Token
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -39,7 +38,7 @@ class SupermanStrategy:
     def __init__(self) -> None:
         self.config = _Config()
 
-    def on_market(self, context: StrategyContext) -> PositionTarget | None:
+    def on_market(self, context: StrategyContext) -> DesiredPositionEvent | None:
         market_status = context.market
 
         market = market_status.market
@@ -94,7 +93,7 @@ class SupermanStrategy:
         elapsed_s: float,
         beat_btc: float,
         curr_btc: float,
-    ) -> PositionTarget | None:
+    ) -> DesiredPositionEvent | None:
         if elapsed_s < self.config.observe_min_sec:
             return None
         if elapsed_s > self.config.observe_max_sec:
@@ -106,7 +105,7 @@ class SupermanStrategy:
             return None
 
         logger.info("signal: %s", token.key)
-        return PositionTarget(
+        return DesiredPositionEvent(
             market=market,
             token=token,
             shares=self.config.entry_shares,
@@ -129,7 +128,7 @@ class SupermanStrategy:
         ) or elapsed_s <= self.config.observe_max_sec:
             token = self._check_signal(market, beat_btc, curr_btc, mkt_quote)
             if token is not None:
-                return PositionTarget(
+                return DesiredPositionEvent(
                     market=market,
                     token=token,
                     shares=self.config.entry_shares,
@@ -137,7 +136,7 @@ class SupermanStrategy:
                     style=ExecutionStyle.PASSIVE,
                 )
             else:
-                return PositionTarget(
+                return DesiredPositionEvent(
                     market=market,
                     token=position.token,
                     shares=0.0,
@@ -145,7 +144,7 @@ class SupermanStrategy:
                     style=ExecutionStyle.PASSIVE,
                 )
         else:
-            return PositionTarget(
+            return DesiredPositionEvent(
                 market=market,
                 token=position.token,
                 shares=0.0,
@@ -163,7 +162,7 @@ class SupermanStrategy:
         curr_btc: float,
     ):
         if elapsed_s > self.config.maker_exit_sec:
-            return PositionTarget(
+            return DesiredPositionEvent(
                 market=market,
                 token=position.token,
                 shares=0.0,
@@ -181,7 +180,7 @@ class SupermanStrategy:
         curr_btc: float,
     ):
         if elapsed_s < self.config.taker_exit_sec:
-            return PositionTarget(
+            return DesiredPositionEvent(
                 market=market,
                 token=position.token,
                 shares=0.0,
@@ -189,7 +188,7 @@ class SupermanStrategy:
                 style=ExecutionStyle.PASSIVE,
             )
         else:
-            return PositionTarget(
+            return DesiredPositionEvent(
                 market=market,
                 token=position.token,
                 shares=0.0,
