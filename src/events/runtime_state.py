@@ -4,6 +4,6 @@ from dataclasses import dataclass
 
 
 @dataclass(slots=True, frozen=True)
-class StrategyTriggerEvent:
+class RuntimeStateEvent:
     ts_ms: int
     reason: str
