@@ -21,16 +21,16 @@ from state.component import runtime_state_component
 from strategy.component import strategy_component
 from strategy.engine import StrategyEngine
 from strategy.strategy import Strategy
-from streams.component import (
+from streams import (
+    CryptoOHLCVStream,
+    CryptoQuoteStream,
+    MarketQuoteStream,
+    MarketTradeStream,
     crypto_ohlcv_component,
     crypto_quote_component,
     market_quote_component,
     market_trade_component,
 )
-from streams.crypto_ohlcv import CryptoOHLCVStream
-from streams.crypto_quote import CryptoQuoteStream
-from streams.market_quote import MarketQuoteStream
-from streams.market_trade import MarketTradeStream
 
 
 @dataclass(frozen=True, slots=True)
