@@ -7,7 +7,7 @@ import orjson
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
-from events.crypto_quote import CryptoQuoteEvent
+from events import CryptoQuoteEvent
 from utils.env import Env
 from utils.logger import get_logger
 

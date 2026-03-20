@@ -5,19 +5,17 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
-from strategies.target import ExecutionStyle, PositionTarget
+from state.context import Position
 
 from clients.polymarket_clob import TradeClient
 from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
-from events.market_order import MarketOrderEvent
-from events.market_trade import MarketTradeEvent
+from events import DesiredPositionEvent, ExecutionStyle, MarketOrderEvent, MarketTradeEvent
 from execution.managed_order import (
     ManagedOrder,
     ManagedTrade,
     TradePurpose,
 )
 from markets.base import Token
-from state.context import Position, PositionLatestState
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -42,7 +40,7 @@ class ExecutionEngine:
         self._max_replace_count = max_replace_count
 
         self._lock = asyncio.Lock()
-        self._target: PositionTarget | None = None
+        self._target: DesiredPositionEvent | None = None
         self._maker_client = maker_client
         self._taker_client = taker_client or maker_client
 
@@ -62,12 +60,7 @@ class ExecutionEngine:
         self._pending_replace_count_by_token_id: dict[str, int] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
 
-    async def latest_state(self) -> PositionLatestState:
-        async with self._lock:
-            positions = self._calc_positions_by_token()
-            return PositionLatestState(positions=list(positions.values()))
-
-    async def handle_position_target(self, target: PositionTarget) -> None:
+    async def handle_position_target(self, target: DesiredPositionEvent) -> None:
         async with self._lock:
             self._target = target
             self._tokens_by_token_id[target.token.id] = target.token
@@ -119,7 +112,7 @@ class ExecutionEngine:
 
     async def _ensure_target_order(
         self,
-        target: PositionTarget,
+        target: DesiredPositionEvent,
         *,
         side: Side,
         shares: float,
@@ -184,7 +177,7 @@ class ExecutionEngine:
                 return order
         return None
 
-    async def _cancel_other_token_orders(self, target: PositionTarget) -> None:
+    async def _cancel_other_token_orders(self, target: DesiredPositionEvent) -> None:
         for order in await self._active_orders():
             if order.token.id == target.token.id:
                 continue
@@ -225,7 +218,7 @@ class ExecutionEngine:
 
     async def _submit_order(
         self,
-        target: PositionTarget,
+        target: DesiredPositionEvent,
         *,
         side: Side,
         shares: float,

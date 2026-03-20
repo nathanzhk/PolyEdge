@@ -2,11 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_quote import CryptoQuoteEvent
-from events.market_quote import MarketQuoteEvent
+from events import CryptoOHLCVEvent, CryptoQuoteEvent, MarketQuoteEvent
 from markets.base import Market
-from state.context import MarketLatestState
 from utils.logger import get_logger
 
 logger = get_logger("MARKET STATE")
@@ -14,7 +11,7 @@ logger = get_logger("MARKET STATE")
 _MAX_BEAT_OFFSET_MS = 200
 
 
-class MarketState:
+class RuntimeState:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._market: Market | None = None
@@ -58,16 +55,6 @@ class MarketState:
     async def update_crypto_ohlcv(self, ohlcv: CryptoOHLCVEvent) -> None:
         async with self._lock:
             self._crypto_ohlcv = ohlcv
-
-    async def latest_state(self) -> MarketLatestState:
-        async with self._lock:
-            return MarketLatestState(
-                market=self._market,
-                beat_price=self._beat_price,
-                market_quote=self._market_quote,
-                crypto_quote=self._crypto_quote,
-                crypto_ohlcv=self._crypto_ohlcv,
-            )
 
     def _record_beat_price(self) -> None:
         if self._market is None or self._crypto_quote is None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_quote import CryptoQuoteEvent
+from events import CryptoOHLCVEvent, CryptoQuoteEvent
 from indicators.indicator_state import IndicatorState
 from indicators.macd import MacdIndicator
 

@@ -2,36 +2,33 @@ from __future__ import annotations
 
 import asyncio
 from time import perf_counter_ns
+from typing import TYPE_CHECKING
 
 from event_bus import (
     EventBus,
     OverflowPolicy,
     Subscription,
 )
-from events.crypto_ohlcv import CryptoOHLCVEvent
-from events.crypto_quote import CryptoQuoteEvent
-from events.market_quote import MarketQuoteEvent
-from events.strategy_trigger import StrategyTriggerEvent
-from indicators.indicator_engine import IndicatorEngine
-from registry import ComponentFactory
-from state.market_state import MarketState
+from events import CryptoOHLCVEvent, CryptoQuoteEvent, MarketQuoteEvent, RuntimeStateEvent
+from state.runtime_state import RuntimeState
 from utils.logger import get_logger
 from utils.stats import LatencyStats
+
+if TYPE_CHECKING:
+    from app import ComponentFactory
 
 logger = get_logger("RUNTIME")
 
 
-class MarketStateComponent:
+class RuntimeStateComponent:
     def __init__(
         self,
         *,
         bus: EventBus,
-        market_state: MarketState,
-        indicator_engine: IndicatorEngine,
+        runtime_state: RuntimeState,
     ) -> None:
         self._bus = bus
-        self._market_state = market_state
-        self._indicator_engine = indicator_engine
+        self._runtime_state = runtime_state
 
     def start(self, tasks: asyncio.TaskGroup) -> None:
         market_quote_events = self._bus.subscribe(
@@ -61,29 +58,26 @@ class MarketStateComponent:
         latency_stats = LatencyStats("market tick", logger)
         async for quote in events:
             started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
-            await self._market_state.update_market_quote(quote)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=quote.ts_ms, reason="market_quote"))
+            await self._runtime_state.update_market_quote(quote)
+            await self._bus.publish(RuntimeStateEvent(ts_ms=quote.ts_ms, reason="market_quote"))
             latency_stats.record_ns(started_at_ns)
 
     async def _crypto_quote_loop(self, events: Subscription[CryptoQuoteEvent]) -> None:
         latency_stats = LatencyStats("crypto tick", logger)
         async for quote in events:
             started_at_ns = perf_counter_ns() if latency_stats.enabled else 0
-            await self._market_state.update_crypto_quote(quote)
-            await self._indicator_engine.on_crypto_quote(quote)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=quote.ts_ms, reason="crypto_quote"))
+            await self._runtime_state.update_crypto_quote(quote)
+            await self._bus.publish(RuntimeStateEvent(ts_ms=quote.ts_ms, reason="crypto_quote"))
             latency_stats.record_ns(started_at_ns)
 
     async def _crypto_ohlcv_loop(self, events: Subscription[CryptoOHLCVEvent]) -> None:
         async for ohlcv in events:
-            await self._market_state.update_crypto_ohlcv(ohlcv)
-            await self._indicator_engine.on_crypto_ohlcv(ohlcv)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=ohlcv.ts_ms, reason="crypto_ohlcv"))
+            await self._runtime_state.update_crypto_ohlcv(ohlcv)
+            await self._bus.publish(RuntimeStateEvent(ts_ms=ohlcv.ts_ms, reason="crypto_ohlcv"))
 
 
-def market_state_component() -> ComponentFactory:
-    return lambda ctx: MarketStateComponent(
-        bus=ctx.bus,
-        market_state=ctx.market_state,
-        indicator_engine=ctx.indicator_engine,
+def runtime_state_component() -> ComponentFactory:
+    return lambda context: RuntimeStateComponent(
+        bus=context.bus,
+        runtime_state=context.runtime_state,
     )

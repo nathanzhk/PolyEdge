@@ -1,9 +1,8 @@
 import asyncio
 
-from strategies.strategy import DefaultStrategy
-
-from app import TradingApp
+from app import Runtime
 from markets.btc import BTC5mMarket
+from strategy.strategy import DefaultStrategy
 from utils.env import Env
 from utils.logger import configure_logging, get_logger
 
@@ -14,11 +13,12 @@ async def run() -> None:
     Env.load()
     configure_logging()
 
-    await TradingApp(
+    runtime = Runtime(
         market=BTC5mMarket,
-        symble="BTCUSDT",
+        symbol="BTCUSDT",
         strategy=DefaultStrategy(),
-    ).run()
+    )
+    await runtime.run()
 
 
 def main() -> None:

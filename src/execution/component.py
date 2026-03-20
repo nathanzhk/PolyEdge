@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-
-from strategies.target import PositionTarget
+from typing import TYPE_CHECKING
 
 from event_bus import (
     EventBus,
     OverflowPolicy,
     Subscription,
 )
-from events.market_order import MarketOrderEvent
-from events.market_trade import MarketTradeEvent
-from events.strategy_trigger import StrategyTriggerEvent
+from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent, RuntimeStateEvent
 from execution.engine import ExecutionEngine
-from registry import ComponentFactory
+
+if TYPE_CHECKING:
+    from app import ComponentFactory
 
 
 class ExecutionComponent:
@@ -34,7 +33,7 @@ class ExecutionComponent:
             overflow=OverflowPolicy.BLOCK,
         )
         position_targets = self._bus.subscribe(
-            PositionTarget,
+            DesiredPositionEvent,
             name="execution.position-targets",
             maxsize=1,
             overflow=OverflowPolicy.DROP_OLDEST,
@@ -49,15 +48,15 @@ class ExecutionComponent:
     ) -> None:
         async for event in events:
             await self._execution_engine.handle_event(event)
-            await self._bus.publish(StrategyTriggerEvent(ts_ms=event.ts_ms, reason="market_trade"))
+            await self._bus.publish(RuntimeStateEvent(ts_ms=event.ts_ms, reason="market_trade"))
 
-    async def _position_target_loop(self, targets: Subscription[PositionTarget]) -> None:
+    async def _position_target_loop(self, targets: Subscription[DesiredPositionEvent]) -> None:
         async for target in targets:
             await self._execution_engine.handle_position_target(target)
 
 
 def execution_component() -> ComponentFactory:
-    return lambda ctx: ExecutionComponent(
-        bus=ctx.bus,
-        execution_engine=ctx.execution_engine,
+    return lambda context: ExecutionComponent(
+        bus=context.bus,
+        execution_engine=context.execution_engine,
     )

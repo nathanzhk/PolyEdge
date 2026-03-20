@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import asyncio
-
-from strategies.component import strategy_component
-from strategies.strategy import Strategy
-from strategies.strategy_engine import StrategyEngine
+from collections.abc import AsyncIterable, Callable
+from dataclasses import dataclass
+from typing import Protocol
 
 from clients.polymarket_clob import MakerTradeClient, TakerTradeClient
 from event_bus import EventBus
+from events import (
+    CryptoOHLCVEvent,
+    CryptoQuoteEvent,
+    MarketOrderEvent,
+    MarketQuoteEvent,
+    MarketTradeEvent,
+)
 from execution.component import execution_component
 from execution.engine import ExecutionEngine
-from indicators.indicator_engine import IndicatorEngine
-from indicators.indicator_state import IndicatorState
 from markets.base import Market
-from registry import ComponentFactory, RuntimeContext
-from state.component import market_state_component
-from state.market_state import MarketState
+from state.component import runtime_state_component
+from strategy.component import strategy_component
+from strategy.engine import StrategyEngine
+from strategy.strategy import Strategy
 from streams.component import (
     crypto_ohlcv_component,
     crypto_quote_component,
@@ -28,54 +33,54 @@ from streams.market_quote import MarketQuoteStream
 from streams.market_trade import MarketTradeStream
 
 
-class TradingApp:
-    def __init__(
-        self,
-        *,
-        market: type[Market],
-        symble: str,
-        strategy: Strategy,
-    ) -> None:
-        self._component_factories: list[ComponentFactory] = []
-        maker = MakerTradeClient()
-        taker = TakerTradeClient()
+@dataclass(frozen=True, slots=True)
+class RuntimeContext:
+    bus: EventBus
+    strategy_engine: StrategyEngine
+    execution_engine: ExecutionEngine
+    market_quote_stream: AsyncIterable[MarketQuoteEvent]
+    market_trade_stream: AsyncIterable[MarketOrderEvent | MarketTradeEvent]
+    crypto_quote_stream: AsyncIterable[CryptoQuoteEvent]
+    crypto_ohlcv_stream: AsyncIterable[CryptoOHLCVEvent]
 
-        market_state = MarketState()
-        indicator_state = IndicatorState()
-        indicator_engine = IndicatorEngine(indicator_state)
-        execution_engine = ExecutionEngine(maker, taker)
-        strategy_engine = StrategyEngine(
-            market_state=market_state,
-            indicator_state=indicator_state,
-            execution_engine=execution_engine,
-            strategy=strategy,
-        )
+
+class RuntimeComponent(Protocol):
+    def start(self, tasks: asyncio.TaskGroup) -> None:
+        raise NotImplementedError
+
+
+ComponentFactory = Callable[[RuntimeContext], RuntimeComponent]
+
+
+class Runtime:
+    def __init__(self, *, market: type[Market], symbol: str, strategy: Strategy) -> None:
+        self._component_factories: list[ComponentFactory] = []
+        maker_client = MakerTradeClient()
+        taker_client = TakerTradeClient()
         self._context = RuntimeContext(
             bus=EventBus(),
+            strategy_engine=StrategyEngine(strategy),
+            execution_engine=ExecutionEngine(maker_client, taker_client),
             market_quote_stream=MarketQuoteStream(market),
-            crypto_quote_stream=CryptoQuoteStream(symble),
-            market_trade_stream=MarketTradeStream(maker.get_credentials()),
-            crypto_ohlcv_stream=CryptoOHLCVStream(symble),
-            market_state=market_state,
-            indicator_engine=indicator_engine,
-            execution_engine=execution_engine,
-            strategy_engine=strategy_engine,
+            crypto_quote_stream=CryptoQuoteStream(symbol),
+            market_trade_stream=MarketTradeStream(maker_client.get_credentials()),
+            crypto_ohlcv_stream=CryptoOHLCVStream(symbol),
         )
         self._register_components()
 
     async def run(self) -> None:
         async with asyncio.TaskGroup() as tasks:
-            for factory in self._component_factories:
-                factory(self._context).start(tasks)
+            for component_factory in self._component_factories:
+                component_factory(self._context).start(tasks)
 
     def _register_components(self) -> None:
-        self._register_component(market_quote_component())
-        self._register_component(crypto_quote_component())
-        self._register_component(market_trade_component())
-        self._register_component(crypto_ohlcv_component())
-        self._register_component(market_state_component())
-        self._register_component(execution_component())
         self._register_component(strategy_component())
+        self._register_component(execution_component())
+        self._register_component(market_quote_component())
+        self._register_component(market_trade_component())
+        self._register_component(crypto_quote_component())
+        self._register_component(crypto_ohlcv_component())
+        self._register_component(runtime_state_component())
 
     def _register_component(self, factory: ComponentFactory) -> None:
         self._component_factories.append(factory)
