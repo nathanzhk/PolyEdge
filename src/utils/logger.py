@@ -9,7 +9,7 @@ from pathlib import Path
 from utils.env import Env
 from utils.time import fmt_ts_s
 
-_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
 
 _COLOR_RESET = "\033[0m"
