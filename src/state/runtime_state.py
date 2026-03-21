@@ -47,7 +47,7 @@ class RuntimeState:
                 self._yes_quote.token.key,
                 self._yes_quote.best_bid,
                 self._yes_quote.best_ask,
-                elapsed_ms_since(self._yes_quote.recv_mono_ns),
+                elapsed_ms_since(self._no_quote.recv_mono_ns),
                 self._no_quote.token.key,
                 self._no_quote.best_bid,
                 self._no_quote.best_ask,
@@ -96,6 +96,6 @@ class RuntimeState:
         if beat_offset_abs_ms > _MAX_BEAT_OFFSET_MS:
             return
         if self._beat_offset_ms is None or beat_offset_abs_ms < abs(self._beat_offset_ms):
-            logger.debug("beat=%.2f offset=%.2fms", self._beat_price, beat_offset_ms)
+            logger.debug("beat=%.2f offset=%dms", self._beat_price, beat_offset_ms)
             self._beat_price = round((quote.best_bid + quote.best_ask) / 2, 3)
             self._beat_offset_ms = beat_offset_ms
