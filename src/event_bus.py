@@ -5,7 +5,11 @@ from collections.abc import AsyncIterator
 from enum import Enum
 from typing import Any, TypeVar
 
+from utils.logger import get_logger
+
 T = TypeVar("T")
+
+logger = get_logger("BUS")
 
 
 class OverflowPolicy(Enum):
@@ -37,7 +41,9 @@ class Subscription[T]:
         return self
 
     async def __anext__(self) -> T:
-        return await self.queue.get()
+        event = await self.queue.get()
+        _log_queue_state("dequeue", self, event)
+        return event
 
 
 class EventBus:
@@ -71,25 +77,46 @@ class EventBus:
     async def _deliver(self, subscription: Subscription[Any], event: object) -> None:
         if subscription.overflow == OverflowPolicy.BLOCK:
             await subscription.queue.put(event)
+            _log_queue_state("enqueue", subscription, event)
             return
 
         if subscription.overflow == OverflowPolicy.DROP_NEWEST:
             try:
                 subscription.queue.put_nowait(event)
+                _log_queue_state("enqueue", subscription, event)
             except asyncio.QueueFull:
                 subscription.dropped_count += 1
+                _log_queue_state("drop_newest", subscription, event)
             return
 
         if subscription.overflow == OverflowPolicy.DROP_OLDEST:
             if subscription.queue.full():
                 try:
-                    subscription.queue.get_nowait()
+                    dropped_event = subscription.queue.get_nowait()
                     subscription.dropped_count += 1
+                    _log_queue_state("drop_oldest", subscription, dropped_event)
                 except asyncio.QueueEmpty:
                     pass
             subscription.queue.put_nowait(event)
+            _log_queue_state("enqueue", subscription, event)
             return
 
         if subscription.overflow == OverflowPolicy.RAISE:
             subscription.queue.put_nowait(event)
+            _log_queue_state("enqueue", subscription, event)
             return
+
+
+def _log_queue_state(action: str, subscription: Subscription[Any], event: object) -> None:
+    maxsize = subscription.queue.maxsize
+    maxsize_label = "unbounded" if maxsize <= 0 else str(maxsize)
+    logger.debug(
+        "queue=%s action=%s event=%s qsize=%d/%s dropped=%d overflow=%s",
+        subscription.name,
+        action,
+        type(event).__name__,
+        subscription.queue.qsize(),
+        maxsize_label,
+        subscription.dropped_count,
+        subscription.overflow.value,
+    )

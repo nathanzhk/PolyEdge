@@ -24,7 +24,7 @@ class RuntimeStateComponent:
         market_quote_events = self._bus.subscribe(
             MarketQuoteEvent,
             name="runtime-state.market-quote",
-            maxsize=1,
+            maxsize=100,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
         tasks.create_task(self._market_quote_loop(market_quote_events))
@@ -32,7 +32,7 @@ class RuntimeStateComponent:
         crypto_quote_events = self._bus.subscribe(
             CryptoQuoteEvent,
             name="runtime-state.crypto-quote",
-            maxsize=1,
+            maxsize=100,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
         tasks.create_task(self._crypto_quote_loop(crypto_quote_events))

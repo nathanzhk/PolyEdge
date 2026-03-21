@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from app import Runtime
 from markets.btc import BTC5mMarket
@@ -12,6 +13,11 @@ logger = get_logger("MAIN")
 async def run() -> None:
     Env.load()
     configure_logging()
+
+    bus_logger = get_logger("BUS")
+    bus_logger.setLevel(logging.INFO)
+    state_logger = get_logger("STATE")
+    state_logger.setLevel(logging.INFO)
 
     runtime = Runtime(
         market=BTC5mMarket,

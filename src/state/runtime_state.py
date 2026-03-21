@@ -37,21 +37,13 @@ class RuntimeState:
                 self._yes_quote = quote
             if quote.token.id == self._no_token.id:
                 self._no_quote = quote
-        if self._yes_quote is not None and self._no_quote is not None:
-            logger.debug(
-                (
-                    "latency=%.2fms outcome=%s best_bid=%.2f best_ask=%.2f | "
-                    "latency=%.2fms outcome=%s best_bid=%.2f best_ask=%.2f"
-                ),
-                elapsed_ms_since(self._yes_quote.recv_mono_ns),
-                self._yes_quote.token.key,
-                self._yes_quote.best_bid,
-                self._yes_quote.best_ask,
-                elapsed_ms_since(self._no_quote.recv_mono_ns),
-                self._no_quote.token.key,
-                self._no_quote.best_bid,
-                self._no_quote.best_ask,
-            )
+        logger.debug(
+            "latency=%.2fms outcome=%s best_bid=%.2f best_ask=%.2f",
+            elapsed_ms_since(quote.recv_mono_ns),
+            quote.token.key,
+            quote.best_bid,
+            quote.best_ask,
+        )
 
     async def update_crypto_quote(self, quote: CryptoQuoteEvent) -> None:
         async with self._lock:
@@ -86,7 +78,7 @@ class RuntimeState:
         self._market = market
         self._beat_price = None
         self._beat_offset_ms = None
-        logger.debug("new market %s", market.title)
+        logger.info("new market %s", market.title)
 
     def _record_beat_price(self, quote: CryptoQuoteEvent) -> None:
         if self._market is None:
@@ -96,6 +88,6 @@ class RuntimeState:
         if beat_offset_abs_ms > _MAX_BEAT_OFFSET_MS:
             return
         if self._beat_offset_ms is None or beat_offset_abs_ms < abs(self._beat_offset_ms):
-            logger.debug("beat=%.2f offset=%dms", self._beat_price, beat_offset_ms)
             self._beat_price = round((quote.best_bid + quote.best_ask) / 2, 3)
             self._beat_offset_ms = beat_offset_ms
+            logger.info("beat=%.2f offset=%dms", self._beat_price, beat_offset_ms)
