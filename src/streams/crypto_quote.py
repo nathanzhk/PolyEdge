@@ -10,7 +10,9 @@ from websockets.exceptions import ConnectionClosed
 from events import CryptoQuoteEvent
 from utils.env import Env
 from utils.logger import get_logger
+from utils.time import now_ts_ms
 
+_BUCKET_INTERVAL_MS = 10
 _RECONNECT_DELAY_S = 2
 
 logger = get_logger("CRYPTO QUOTE")
@@ -22,6 +24,7 @@ class CryptoQuoteStream:
             raise ValueError("cannot load current symbol")
         self._symbol = symbol.strip().lower()
         self._ws_url = f"{Env.BINANCE_WS_BASE_URL}/{self._symbol}@bookTicker"
+        self._next_bucket_ts_ms = 0
 
     def __aiter__(self) -> AsyncIterator[CryptoQuoteEvent]:
         return self._stream()
@@ -39,6 +42,12 @@ class CryptoQuoteStream:
                 ) as ws:
                     logger.info("connected crypto quote websocket")
                     async for raw in ws:
+                        curr_ts_ms = now_ts_ms()
+                        if curr_ts_ms < self._next_bucket_ts_ms:
+                            continue
+                        self._next_bucket_ts_ms = (
+                            curr_ts_ms - (curr_ts_ms % _BUCKET_INTERVAL_MS) + _BUCKET_INTERVAL_MS
+                        )
                         try:
                             message = orjson.loads(raw)
                         except Exception:
