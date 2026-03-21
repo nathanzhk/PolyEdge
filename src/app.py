@@ -14,11 +14,9 @@ from events import (
     MarketQuoteEvent,
     MarketTradeEvent,
 )
-from execution.component import execution_component
 from execution.engine import ExecutionEngine
 from markets.base import Market
 from state.component import runtime_state_component
-from strategy.component import strategy_component
 from strategy.engine import StrategyEngine
 from strategy.strategy import Strategy
 from streams import (
@@ -74,8 +72,8 @@ class Runtime:
                 component_factory(self._context).start(tasks)
 
     def _register_components(self) -> None:
-        self._register_component(strategy_component())
-        self._register_component(execution_component())
+        # self._register_component(strategy_component())
+        # self._register_component(execution_component())
         self._register_component(market_quote_component())
         self._register_component(market_trade_component())
         self._register_component(crypto_quote_component())

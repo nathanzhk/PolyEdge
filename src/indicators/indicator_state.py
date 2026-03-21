@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 from indicators.indicator import MacdValue
-from state.context import IndicatorLatestState
 
 
 class IndicatorState:
@@ -14,9 +13,3 @@ class IndicatorState:
     async def update_crypto_macd(self, value: MacdValue) -> None:
         async with self._lock:
             self._crypto_macd = value
-
-    async def latest_state(self) -> IndicatorLatestState:
-        async with self._lock:
-            return IndicatorLatestState(
-                crypto_macd=self._crypto_macd,
-            )

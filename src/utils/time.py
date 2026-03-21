@@ -26,6 +26,10 @@ def now_ts_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
+def elapsed_ms_since(start_mono_ns: int) -> float:
+    return (time.perf_counter_ns() - start_mono_ns) / 1_000_000
+
+
 def iso_to_ms(iso_str: str) -> int:
     dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
     return int(dt.timestamp() * 1000)

@@ -5,11 +5,9 @@ import uuid
 from collections.abc import Coroutine
 from typing import Any
 
-from state.context import Position
-
 from clients.polymarket_clob import TradeClient
 from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Side
-from events import DesiredPositionEvent, ExecutionStyle, MarketOrderEvent, MarketTradeEvent
+from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
 from execution.managed_order import (
     ManagedOrder,
     ManagedTrade,
@@ -143,7 +141,7 @@ class ExecutionEngine:
         age_s = (now - current.created_ts_ms) / 1000
         price_moved = abs(current.price - target.price) >= self._replace_price_gap
         size_changed = abs(current.ordered_shares - shares) >= MATCHED_SHARES_GAP
-        ttl_expired = target.style == ExecutionStyle.PASSIVE and age_s >= self._order_ttl_s
+        ttl_expired = target.not_urgent and age_s >= self._order_ttl_s
         if not price_moved and not size_changed and not ttl_expired:
             return
 
@@ -183,38 +181,38 @@ class ExecutionEngine:
                 continue
             await self._cancel_order(order, reason="target token changed")
 
-    def _calc_positions_by_token(self) -> dict[str, Position]:
-        positions: dict[str, Position] = {}
+    # def _calc_positions_by_token(self) -> dict[str, Position]:
+    #     positions: dict[str, Position] = {}
 
-        def position_for_token(token: Token) -> Position:
-            position = positions.get(token.id)
-            if position is None:
-                holding_shares = self._settled_shares_by_token_id.get(token.id, ZERO)
-                holding_cost = self._settled_cost_by_token_id.get(token.id, ZERO)
-                position = Position(
-                    token=token,
-                    opening_shares=ZERO,
-                    holding_shares=holding_shares,
-                    closing_shares=ZERO,
-                    holding_avg_price=self._calc_holding_avg_price(holding_shares, holding_cost),
-                    holding_cost=holding_cost,
-                    holding_open_ts_ms=self._settled_open_ts_ms_by_token_id.get(token.id),
-                )
-                positions[token.id] = position
-            return position
+    #     def position_for_token(token: Token) -> Position:
+    #         position = positions.get(token.id)
+    #         if position is None:
+    #             holding_shares = self._settled_shares_by_token_id.get(token.id, ZERO)
+    #             holding_cost = self._settled_cost_by_token_id.get(token.id, ZERO)
+    #             position = Position(
+    #                 token=token,
+    #                 opening_shares=ZERO,
+    #                 holding_shares=holding_shares,
+    #                 closing_shares=ZERO,
+    #                 holding_avg_price=self._calc_holding_avg_price(holding_shares, holding_cost),
+    #                 holding_cost=holding_cost,
+    #                 holding_open_ts_ms=self._settled_open_ts_ms_by_token_id.get(token.id),
+    #             )
+    #             positions[token.id] = position
+    #         return position
 
-        for token in self._tokens_by_token_id.values():
-            position_for_token(token)
+    #     for token in self._tokens_by_token_id.values():
+    #         position_for_token(token)
 
-        for order in self._orders_by_local_id.values():
-            position = position_for_token(order.token)
-            unsettled_shares = order.off_chain_pending_shares + order.on_chain_pending_shares
-            if order.side == Side.BUY:
-                position.opening_shares = round(position.opening_shares + unsettled_shares, 6)
-            else:
-                position.closing_shares = round(position.closing_shares + unsettled_shares, 6)
+    #     for order in self._orders_by_local_id.values():
+    #         position = position_for_token(order.token)
+    #         unsettled_shares = order.off_chain_pending_shares + order.on_chain_pending_shares
+    #         if order.side == Side.BUY:
+    #             position.opening_shares = round(position.opening_shares + unsettled_shares, 6)
+    #         else:
+    #             position.closing_shares = round(position.closing_shares + unsettled_shares, 6)
 
-        return positions
+    #     return positions
 
     async def _submit_order(
         self,
@@ -231,7 +229,7 @@ class ExecutionEngine:
             )
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
-        as_maker = target.style == ExecutionStyle.PASSIVE
+        as_maker = target.not_urgent
         draft_order = ManagedOrder(
             local_id=local_id,
             order_id=None,

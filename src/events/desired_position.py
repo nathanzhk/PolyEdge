@@ -11,4 +11,4 @@ class DesiredPositionEvent:
     token: Token | None
     shares: float
     price: float
-    urgent: bool
+    not_urgent: bool

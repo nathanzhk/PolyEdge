@@ -3,14 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 
-from state.context import Position, StrategyContext
-
-from events import DesiredPositionEvent, ExecutionStyle, MarketQuoteEvent
+from events import DesiredPositionEvent, MarketQuoteEvent
 from markets.base import Market, Token
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
 logger = get_logger("SUPERMAN")
+
+
+class Position:
+    token: Token
 
 
 class _PositionStatus(IntEnum):
@@ -34,11 +36,16 @@ class _Config:
     entry_shares: float = 5.02
 
 
+class StrategyContext:
+    market: Market
+
+
 class SupermanStrategy:
     def __init__(self) -> None:
         self.config = _Config()
 
-    def on_market(self, context: StrategyContext) -> DesiredPositionEvent | None:
+    def on_market(self) -> DesiredPositionEvent | None:
+        context = StrategyContext()
         market_status = context.market
 
         market = market_status.market
@@ -110,7 +117,7 @@ class SupermanStrategy:
             token=token,
             shares=self.config.entry_shares,
             price=_bid_for_token(mkt_quote, token),
-            style=ExecutionStyle.PASSIVE,
+            not_urgent=True,
         )
 
     def _opening(
@@ -133,7 +140,7 @@ class SupermanStrategy:
                     token=token,
                     shares=self.config.entry_shares,
                     price=_bid_for_token(mkt_quote, token),
-                    style=ExecutionStyle.PASSIVE,
+                    not_urgent=True,
                 )
             else:
                 return DesiredPositionEvent(
@@ -141,7 +148,7 @@ class SupermanStrategy:
                     token=position.token,
                     shares=0.0,
                     price=0.0,
-                    style=ExecutionStyle.PASSIVE,
+                    not_urgent=True,
                 )
         else:
             return DesiredPositionEvent(
@@ -149,7 +156,7 @@ class SupermanStrategy:
                 token=position.token,
                 shares=0.0,
                 price=0.0,
-                style=ExecutionStyle.PASSIVE,
+                not_urgent=True,
             )
 
     def _holding(
@@ -167,7 +174,7 @@ class SupermanStrategy:
                 token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_quote, position.token),
-                style=ExecutionStyle.PASSIVE,
+                not_urgent=True,
             )
 
     def _closing(
@@ -185,7 +192,7 @@ class SupermanStrategy:
                 token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_quote, position.token),
-                style=ExecutionStyle.PASSIVE,
+                not_urgent=True,
             )
         else:
             return DesiredPositionEvent(
@@ -193,7 +200,7 @@ class SupermanStrategy:
                 token=position.token,
                 shares=0.0,
                 price=_ask_for_token(mkt_quote, position.token),
-                style=ExecutionStyle.URGENT,
+                not_urgent=False,
             )
 
     def _check_signal(

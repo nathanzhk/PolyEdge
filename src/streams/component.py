@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from app import ComponentFactory
 
 
-class _StreamEventComponent[T]:
+class _StreamComponent[T]:
     def __init__(self, *, bus: EventBus, stream: AsyncIterable[T]) -> None:
         self._bus = bus
         self._stream = stream
@@ -31,28 +31,28 @@ class _StreamEventComponent[T]:
 
 
 def market_quote_component() -> ComponentFactory:
-    return lambda context: _StreamEventComponent[MarketQuoteEvent](
+    return lambda context: _StreamComponent[MarketQuoteEvent](
         bus=context.bus,
         stream=context.market_quote_stream,
     )
 
 
 def market_trade_component() -> ComponentFactory:
-    return lambda context: _StreamEventComponent[MarketOrderEvent | MarketTradeEvent](
+    return lambda context: _StreamComponent[MarketOrderEvent | MarketTradeEvent](
         bus=context.bus,
         stream=context.market_trade_stream,
     )
 
 
 def crypto_quote_component() -> ComponentFactory:
-    return lambda context: _StreamEventComponent[CryptoQuoteEvent](
+    return lambda context: _StreamComponent[CryptoQuoteEvent](
         bus=context.bus,
         stream=context.crypto_quote_stream,
     )
 
 
 def crypto_ohlcv_component() -> ComponentFactory:
-    return lambda context: _StreamEventComponent[CryptoOHLCVEvent](
+    return lambda context: _StreamComponent[CryptoOHLCVEvent](
         bus=context.bus,
         stream=context.crypto_ohlcv_stream,
     )
