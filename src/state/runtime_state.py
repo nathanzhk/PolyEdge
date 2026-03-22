@@ -75,6 +75,8 @@ class RuntimeState:
     def _switch_market(self, market: Market) -> None:
         self._yes_token = market.yes_token
         self._no_token = market.no_token
+        self._yes_quote = None
+        self._no_quote = None
         self._market = market
         self._beat_price = None
         self._beat_offset_ms = None
