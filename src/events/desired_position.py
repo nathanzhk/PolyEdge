@@ -8,7 +8,7 @@ from markets.base import Market, Token
 @dataclass(slots=True, frozen=True)
 class DesiredPositionEvent:
     market: Market
-    token: Token | None
+    token: Token
     shares: float
     price: float
-    not_urgent: bool
+    force: bool = False
