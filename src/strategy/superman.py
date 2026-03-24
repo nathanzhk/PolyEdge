@@ -37,7 +37,6 @@ class SupermanStrategy:
         self.config = _Config()
 
     def evaluate(self, state: RuntimeStateEvent) -> DesiredPositionEvent | None:
-
         yes_quote = state.yes_token_quote
         no_quote = state.no_token_quote
         market = state.market
@@ -46,8 +45,7 @@ class SupermanStrategy:
         btc_curr = state.crypto_quote.mid
         btc_diff = btc_curr - btc_base
 
-        ts_ms = now_ts_ms()
-        elapsed_s = _elapsed_s(market, ts_ms)
+        elapsed_s = _elapsed_s(market, now_ts_ms())
 
         active_position = self._get_active_position(list(state.positions))
         position_status = self._get_position_status(active_position, elapsed_s)
@@ -106,7 +104,7 @@ class SupermanStrategy:
         if token is None:
             return None
 
-        logger.info("signal: %s", token.key)
+        logger.info("signal %s", token.key)
         return DesiredPositionEvent(
             market=market,
             token=token,
@@ -199,16 +197,16 @@ class SupermanStrategy:
     ) -> Token | None:
         abs_diff = abs(btc_diff)
         if abs_diff < self.config.min_btc_move:
-            logger.debug("skip: btc move %.2f < %.2f", abs_diff, self.config.min_btc_move)
+            logger.debug("btc move %.2f < %.2f", abs_diff, self.config.min_btc_move)
             return None
         if abs_diff > self.config.max_btc_move:
-            logger.debug("skip: btc move %.2f > %.2f", abs_diff, self.config.max_btc_move)
+            logger.debug("btc move %.2f > %.2f", abs_diff, self.config.max_btc_move)
             return None
 
         mid_up = yes_quote.mid
         if mid_up < self.config.neutral_lo or mid_up > self.config.neutral_hi:
             logger.debug(
-                "skip: mid %.2f outside [%.2f, %.2f]",
+                "mid %.2f outside [%.2f, %.2f]",
                 mid_up,
                 self.config.neutral_lo,
                 self.config.neutral_hi,

@@ -41,6 +41,11 @@ def fmt_ts_ms(
     return fmt_ts_s(ts_ms / 1_000, tz=tz, fmt=fmt)
 
 
+def fmt_duration_s(duration_s: int) -> str:
+    minutes, seconds = divmod(duration_s, 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def fmt_ts_s(
     ts_s: int | float, *, tz: TimestampTimezone = "local", fmt: TimestampFormat = "datetime"
 ) -> str:

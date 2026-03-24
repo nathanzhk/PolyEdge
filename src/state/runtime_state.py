@@ -12,7 +12,7 @@ from events import (
 )
 from markets.base import Market, Token
 from utils.logger import get_logger
-from utils.time import elapsed_ms_since
+from utils.time import elapsed_ms_since, fmt_duration_s, now_ts_s
 
 logger = get_logger("STATE")
 
@@ -136,6 +136,7 @@ class RuntimeState:
         if signature == self._last_signature:
             return None
         self._last_signature = signature
+        _log_event(event)
         return event
 
     def _build_event(self, reason: str) -> RuntimeStateEvent | None:
@@ -196,3 +197,28 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
             for position in event.positions
         ),
     )
+
+
+def _log_event(event: RuntimeStateEvent) -> None:
+    logger.debug(
+        "yes=%.2fms no=%.2fms btc=%.2fms ohlcv=%.2fms",
+        elapsed_ms_since(event.yes_token_quote.recv_mono_ns),
+        elapsed_ms_since(event.no_token_quote.recv_mono_ns),
+        elapsed_ms_since(event.crypto_quote.recv_mono_ns),
+        elapsed_ms_since(event.crypto_ohlcv.recv_mono_ns),
+    )
+    logger.info(
+        "%s-%s | UP bid_%.2f ask_%.2f | DOWN bid_%.2f ask_%.2f | BTC $%.2f %s",
+        fmt_duration_s(now_ts_s() - event.market.start_ts_s),
+        fmt_duration_s(event.market.end_ts_s - now_ts_s()),
+        event.yes_token_quote.best_bid,
+        event.yes_token_quote.best_ask,
+        event.no_token_quote.best_bid,
+        event.no_token_quote.best_ask,
+        event.crypto_quote.mid,
+        _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
+    )
+
+
+def _fmt_signed_usd(value: float) -> str:
+    return f"{'+' if value >= 0 else '-'}${abs(value):.2f}"
