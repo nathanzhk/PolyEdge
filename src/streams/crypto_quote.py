@@ -12,7 +12,7 @@ from utils.env import Env
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
-_BUCKET_INTERVAL_MS = 10
+_BUCKET_INTERVAL_MS = 5
 _RECONNECT_DELAY_S = 2
 
 logger = get_logger("CRYPTO QUOTE")

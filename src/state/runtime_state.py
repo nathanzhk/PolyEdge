@@ -201,16 +201,24 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
 
 def _log_event(event: RuntimeStateEvent) -> None:
     logger.debug(
-        "yes=%.2fms no=%.2fms btc=%.2fms ohlcv=%.2fms",
+        "UP %.2fms | DN %.2fms | BTC %.2fms | OHLCV %.2fms",
         elapsed_ms_since(event.yes_token_quote.recv_mono_ns),
         elapsed_ms_since(event.no_token_quote.recv_mono_ns),
         elapsed_ms_since(event.crypto_quote.recv_mono_ns),
         elapsed_ms_since(event.crypto_ohlcv.recv_mono_ns),
     )
     logger.info(
-        "%s-%s | UP bid_%.2f ask_%.2f | DOWN bid_%.2f ask_%.2f | BTC $%.2f %s",
+        "[%s-%s] %.2fms | bid %.2f ▲ ask %.2f | bid %.2f ▼ ask %.2f | $%.2f %s",
         fmt_duration_s(now_ts_s() - event.market.start_ts_s),
         fmt_duration_s(event.market.end_ts_s - now_ts_s()),
+        elapsed_ms_since(
+            max(
+                event.yes_token_quote.recv_mono_ns,
+                event.no_token_quote.recv_mono_ns,
+                event.crypto_quote.recv_mono_ns,
+                event.crypto_ohlcv.recv_mono_ns,
+            )
+        ),
         event.yes_token_quote.best_bid,
         event.yes_token_quote.best_ask,
         event.no_token_quote.best_bid,
@@ -221,4 +229,4 @@ def _log_event(event: RuntimeStateEvent) -> None:
 
 
 def _fmt_signed_usd(value: float) -> str:
-    return f"{'+' if value >= 0 else '-'}${abs(value):.2f}"
+    return f"{'▲ +' if value >= 0 else '▼ -'}${abs(value):.2f}"
