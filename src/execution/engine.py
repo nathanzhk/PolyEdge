@@ -429,13 +429,7 @@ class ExecutionEngine:
             order.should_cancel = False
             order.log(error_message)
 
-    async def handle_event(self, event: MarketOrderEvent | MarketTradeEvent) -> None:
-        if isinstance(event, MarketOrderEvent):
-            await self._handle_order_event(event)
-        else:
-            await self._handle_trade_event(event)
-
-    async def _handle_order_event(self, event: MarketOrderEvent) -> None:
+    async def handle_order_event(self, event: MarketOrderEvent) -> None:
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
@@ -472,7 +466,7 @@ class ExecutionEngine:
             trade_ids_set = self._trade_ids_by_order_id.setdefault(event.order_id, set())
             trade_ids_set.update(event.trade_ids)
 
-    async def _handle_trade_event(self, event: MarketTradeEvent) -> None:
+    async def handle_trade_event(self, event: MarketTradeEvent) -> None:
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
