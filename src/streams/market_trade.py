@@ -91,11 +91,11 @@ def _build_order_event(message: dict) -> MarketOrderEvent | None:
             order_id=message["id"],
             trade_ids=trade_ids if isinstance(trade_ids, list) else [],
             status=MarketOrderStatus(str(message["status"]).upper()),
-            ordered_shares=round(float(message["original_size"]), 6),
-            matched_shares=round(float(message["size_matched"]), 6),
+            shares=round(float(message["original_size"]), 6),
             side=Side(str(message["side"]).upper()),
             type=OrderType(str(message["order_type"]).upper()),
             price=round(float(message["price"]), 3),
+            matched_shares=round(float(message["size_matched"]), 6),
         )
     except Exception:
         return None
