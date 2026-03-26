@@ -183,15 +183,12 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
         event.beat_price,
         tuple(
             (
-                position.market.id,
                 position.token.id,
-                position.shares,
-                position.price,
                 position.opening_shares,
                 position.holding_shares,
                 position.closing_shares,
-                position.holding_avg_price,
                 position.holding_cost,
+                position.holding_avg_price,
                 position.holding_open_ts_ms,
             )
             for position in event.positions
