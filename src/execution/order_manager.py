@@ -43,6 +43,7 @@ class ManagedOrder:
 
     trades: dict[str, ManagedTrade] = field(default_factory=dict)
     should_cancel: bool = False
+    is_cancelling: bool = False
     audit_records: list[tuple[int, str]] = field(default_factory=list)
 
     @property
@@ -50,7 +51,6 @@ class ManagedOrder:
         """off_chain_pending_shares > 0"""
         return (
             self.status == ManagedOrderStatus.SUBMITTING
-            or self.status == ManagedOrderStatus.CANCELLING
             or self.status == ManagedOrderStatus.ZERO_MATCHED
             or self.status == ManagedOrderStatus.PART_MATCHED
         )
@@ -62,15 +62,6 @@ class ManagedOrder:
             self.status == ManagedOrderStatus.ZERO_MATCHED_CANCELED
             or self.status == ManagedOrderStatus.PART_MATCHED_CANCELED
         )
-
-    @property
-    def is_settle_complete(self) -> bool:
-        on_chain_shares = self.on_chain_settled_shares + self.on_chain_failure_shares
-        return round(self.off_chain_matched_shares, 6) == round(on_chain_shares, 6)
-
-    @property
-    def has_settle_failure(self) -> bool:
-        return self.on_chain_failure_shares > 0
 
     @property
     def on_chain_pending_shares(self) -> float:
@@ -164,8 +155,7 @@ class OrderManager:
     ) -> None:
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
-        as_maker = not urgent
-        draft_order = ManagedOrder(
+        order = ManagedOrder(
             local_id=local_id,
             order_id=None,
             market=market,
@@ -174,7 +164,7 @@ class OrderManager:
             shares=shares,
             side=side,
             price=price,
-            as_maker=as_maker,
+            as_maker=not urgent,
             created_ts_ms=now,
             updated_ts_ms=now,
             off_chain_pending_shares=shares,
@@ -183,7 +173,7 @@ class OrderManager:
         )
         logger.info("submit order: %s", local_id)
         async with self._lock:
-            self._orders_by_local_id[local_id] = draft_order
+            self._orders_by_local_id[local_id] = order
             self._tokens_by_token_id[token.id] = token
 
         self._track_background_task(
@@ -193,23 +183,24 @@ class OrderManager:
 
     async def _submit_order_worker(self, local_id: str) -> None:
         async with self._lock:
-            draft_order = self._orders_by_local_id.get(local_id)
-            if draft_order is None:
+            order = self._orders_by_local_id.get(local_id)
+            if order is None:
                 return
-            client = self._maker_client if draft_order.as_maker else self._taker_client
-            submit_order_func = client.buy if draft_order.side == Side.BUY else client.sell
-            token = draft_order.token
-            shares = draft_order.shares
-            price = draft_order.price
+            client = self._maker_client if order.as_maker else self._taker_client
+            submit_order_func = client.buy if order.side == Side.BUY else client.sell
+            token = order.token
+            shares = order.shares
+            price = order.price
+            order.log("submitting")
 
         try:
-            market_order_id = await asyncio.to_thread(submit_order_func, token, shares, price)
+            order_id = await asyncio.to_thread(submit_order_func, token, shares, price)
         except Exception:
             await self._handle_submit_order_failed(local_id)
             raise
 
-        if market_order_id is not None:
-            await self._handle_submit_order_success(local_id, market_order_id)
+        if order_id is not None:
+            await self._handle_submit_order_success(local_id, order_id)
         else:
             await self._handle_submit_order_failed(local_id)
 
@@ -224,11 +215,11 @@ class OrderManager:
             order.status = ManagedOrderStatus.ZERO_MATCHED
             order.log("submit success")
             self._orders_by_order_id[order_id] = order
+            cached_events: list[MarketOrderEvent | MarketTradeEvent] = [
+                *self._cached_order_events_by_order_id.pop(order_id, []),
+                *self._cached_trade_events_by_order_id.pop(order_id, []),
+            ]
 
-        cached_events: list[MarketOrderEvent | MarketTradeEvent] = [
-            *self._cached_order_events_by_order_id.pop(order_id, []),
-            *self._cached_trade_events_by_order_id.pop(order_id, []),
-        ]
         for event in cached_events:
             if isinstance(event, MarketOrderEvent):
                 await self.handle_order_event(event)
@@ -242,7 +233,9 @@ class OrderManager:
                     return
                 order.should_cancel = False
                 order.log("find should cancel")
-            await self.cancel(order, reason="should cancel while submitting")
+            await self.cancel(
+                order.local_id, order.order_id, reason="should cancel while submitting"
+            )
 
     async def _handle_submit_order_failed(self, local_id: str) -> None:
         logger.warning("submit order failed: %s", local_id)
@@ -261,47 +254,41 @@ class OrderManager:
                 order.should_cancel = False
                 order.log("find should cancel")
 
-    async def cancel(
-        self,
-        order: ManagedOrder,
-        *,
-        reason: str,
-    ) -> bool:
-        logger.info("cancel order: %s => %s", order.local_id, order.order_id)
+    async def cancel(self, local_id: str, order_id: str, *, reason: str) -> bool:
+        logger.info("cancel order: %s => %s", local_id, order_id)
         async with self._lock:
-            if order.order_id is None:
-                latest_order = self._orders_by_local_id.get(order.local_id)
+            if order_id is None:
+                order = self._orders_by_local_id.get(local_id)
             else:
-                latest_order = self._orders_by_order_id.get(order.order_id)
-            if latest_order is None:
+                order = self._orders_by_order_id.get(order_id)
+            if order is None:
                 return False
-            if not latest_order.is_active:
-                latest_order.log("cancel without active shares")
+            if not order.is_active:
+                order.log("cancel without active shares")
                 return True
-            if latest_order.order_id is None:
-                if latest_order.status == ManagedOrderStatus.SUBMITTING:
-                    latest_order.should_cancel = True
-                    latest_order.updated_ts_ms = now_ts_ms()
-                    latest_order.log("cancel while submitting")
+            if order.order_id is None:
+                if order.status == ManagedOrderStatus.SUBMITTING:
+                    order.should_cancel = True
+                    order.updated_ts_ms = now_ts_ms()
+                    order.log("cancel while submitting")
                     logger.info(
                         "order should cancel until submit returns: %s (%s)",
-                        latest_order.local_id,
+                        order.local_id,
                         reason,
                     )
                 else:
-                    latest_order.log("unexpected status")
+                    order.log("unexpected status")
                     logger.warning(
                         "unexpected order status without order id: %s %s",
-                        latest_order.local_id,
-                        latest_order.status,
+                        order.local_id,
+                        order.status,
                     )
                 return False
-            if latest_order.should_cancel:
+            if order.should_cancel:
                 return False
-            latest_order.should_cancel = True
-            latest_order.updated_ts_ms = now_ts_ms()
-            latest_order.log(f"cancel requested: {reason}")
-            order_id = latest_order.order_id
+            order.updated_ts_ms = now_ts_ms()
+            order.is_cancelling = True
+            order.log(f"cancel requested: {reason}")
 
         self._track_background_task(
             self._cancel_order_worker(order_id),
@@ -314,8 +301,8 @@ class OrderManager:
             is_success, error_message = await asyncio.to_thread(
                 self._maker_client.cancel_order_by_id, order_id
             )
-        except Exception as exc:
-            await self._handle_cancel_order_failed(order_id, f"cancel raised: {exc!r}")
+        except Exception as e:
+            await self._handle_cancel_order_failed(order_id, f"cancel raised: {e!r}")
             raise
 
         if is_success:
@@ -330,10 +317,13 @@ class OrderManager:
             if order is None:
                 return
             order.updated_ts_ms = now_ts_ms()
-            order.should_cancel = False
-            order.status = ManagedOrderStatus.ZERO_MATCHED_CANCELED
+            order.is_cancelling = False
             order.off_chain_invalid_shares = order.off_chain_pending_shares
             order.off_chain_pending_shares = ZERO
+            if order.off_chain_matched_shares == ZERO:
+                order.status = ManagedOrderStatus.ZERO_MATCHED_CANCELED
+            else:
+                order.status = ManagedOrderStatus.PART_MATCHED_CANCELED
             order.log("canceled")
 
     async def _handle_cancel_order_failed(self, order_id: str, error_message: str) -> None:
@@ -343,7 +333,7 @@ class OrderManager:
             if order is None:
                 return
             order.updated_ts_ms = now_ts_ms()
-            order.should_cancel = False
+            order.is_cancelling = False
             order.log(error_message)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
@@ -371,7 +361,6 @@ class OrderManager:
                     order.status = ManagedOrderStatus.ZERO_MATCHED_CANCELED
                 else:
                     order.status = ManagedOrderStatus.PART_MATCHED_CANCELED
-                order.should_cancel = False
 
             else:
                 order.off_chain_matched_shares = max(

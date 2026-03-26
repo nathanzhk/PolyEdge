@@ -37,7 +37,6 @@ class MarketTradeStatus(StrEnum):
 class ManagedOrderStatus(StrEnum):
     SUBMITTING = "SUBMITTING"  # order_id is None & (pending_shares > 0)
     SUB_FAILED = "SUBMIT_FAILED"  # order_id is None & (invalid_shares > 0)
-    CANCELLING = "CANCELLING"
     ZERO_MATCHED = "ZERO_MATCHED"  # valid & (matched_shares == 0)
     PART_MATCHED = "PART_MATCHED"  # valid & (0 < matched_shares < threshold)
     FULL_MATCHED = "FULL_MATCHED"  # valid & (matched_shares > threshold)
