@@ -8,15 +8,48 @@ from typing import Any
 
 from clients.polymarket_clob import TradeClient
 from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Role, Side
-from events import MarketOrderEvent, MarketTradeEvent
+from events import CurrentPositionEvent, MarketOrderEvent, MarketTradeEvent
 from markets.base import Market, Token
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
 logger = get_logger("TRADE")
 
-ZERO = 0.0
+_ZERO = 0.0
 _MATCHED_SHARES_RATE = 0.98
+_POSITION_SHARES_DUST = 0.02
+
+
+@dataclass(slots=True, frozen=True)
+class PositionSnapshot:
+    token_id: str
+    cost: float = _ZERO
+    shares: float = _ZERO
+    avg_price: float = _ZERO
+    open_ts_ms: int | None = None
+
+
+@dataclass(slots=True)
+class _Position:
+    token_id: str
+    cost: float = _ZERO
+    shares: float = _ZERO
+    open_ts_ms: int | None = None
+
+    @property
+    def avg_price(self) -> float | None:
+        if self.shares <= _POSITION_SHARES_DUST:
+            return None
+        return round(self.cost / self.shares, 3)
+
+    def snapshot(self) -> PositionSnapshot:
+        return PositionSnapshot(
+            token_id=self.token_id,
+            cost=self.cost,
+            shares=self.shares,
+            avg_price=self.avg_price,
+            open_ts_ms=self.open_ts_ms,
+        )
 
 
 @dataclass(slots=True)
@@ -111,11 +144,19 @@ class OrderManager:
         self._orders_by_local_id: dict[str, ManagedOrder] = {}
         self._orders_by_order_id: dict[str, ManagedOrder] = {}
         self._trades_by_trade_id: dict[str, ManagedTrade] = {}
+        self._positions_by_token_id: dict[str, _Position] = {}
 
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
 
         self._background_tasks: set[asyncio.Task[None]] = set()
+
+    async def position_for_token(self, token: Token) -> PositionSnapshot:
+        async with self._lock:
+            position = self._positions_by_token_id.get(token.id)
+            if position is None:
+                return PositionSnapshot(token_id=token.id)
+            return position.snapshot()
 
     async def active_orders(self) -> list[ManagedOrder]:
         async with self._lock:
@@ -128,8 +169,8 @@ class OrderManager:
         return None
 
     async def exposure_for_token(self, token: Token) -> tuple[float, float]:
-        opening_shares = ZERO
-        closing_shares = ZERO
+        opening_shares = _ZERO
+        closing_shares = _ZERO
         for order in await self.active_orders():
             if order.token.id != token.id:
                 continue
@@ -168,8 +209,8 @@ class OrderManager:
             created_ts_ms=now,
             updated_ts_ms=now,
             off_chain_pending_shares=shares,
-            off_chain_matched_shares=ZERO,
-            off_chain_invalid_shares=ZERO,
+            off_chain_matched_shares=_ZERO,
+            off_chain_invalid_shares=_ZERO,
         )
         logger.info("submit order: %s", local_id)
         async with self._lock:
@@ -215,10 +256,13 @@ class OrderManager:
             order.status = ManagedOrderStatus.ZERO_MATCHED
             order.log("submit success")
             self._orders_by_order_id[order_id] = order
-            cached_events: list[MarketOrderEvent | MarketTradeEvent] = [
-                *self._cached_order_events_by_order_id.pop(order_id, []),
-                *self._cached_trade_events_by_order_id.pop(order_id, []),
-            ]
+            cached_events: list[MarketOrderEvent | MarketTradeEvent] = sorted(
+                [
+                    *self._cached_order_events_by_order_id.pop(order_id, []),
+                    *self._cached_trade_events_by_order_id.pop(order_id, []),
+                ],
+                key=lambda e: e.exch_ts_ms,
+            )
 
         for event in cached_events:
             if isinstance(event, MarketOrderEvent):
@@ -245,7 +289,7 @@ class OrderManager:
                 return
             order.updated_ts_ms = now_ts_ms()
             order.off_chain_invalid_shares = order.off_chain_pending_shares
-            order.off_chain_pending_shares = ZERO
+            order.off_chain_pending_shares = _ZERO
             if not order.should_cancel:
                 order.status = ManagedOrderStatus.SUB_FAILED
                 order.log("submit failed")
@@ -319,8 +363,8 @@ class OrderManager:
             order.updated_ts_ms = now_ts_ms()
             order.is_cancelling = False
             order.off_chain_invalid_shares = order.off_chain_pending_shares
-            order.off_chain_pending_shares = ZERO
-            if order.off_chain_matched_shares == ZERO:
+            order.off_chain_pending_shares = _ZERO
+            if order.off_chain_matched_shares == _ZERO:
                 order.status = ManagedOrderStatus.ZERO_MATCHED_CANCELED
             else:
                 order.status = ManagedOrderStatus.PART_MATCHED_CANCELED
@@ -356,8 +400,8 @@ class OrderManager:
                 order.off_chain_invalid_shares = min(
                     order.off_chain_invalid_shares, event.unmatched_shares
                 )
-                order.off_chain_pending_shares = ZERO
-                if order.off_chain_matched_shares == ZERO:
+                order.off_chain_pending_shares = _ZERO
+                if order.off_chain_matched_shares == _ZERO:
                     order.status = ManagedOrderStatus.ZERO_MATCHED_CANCELED
                 else:
                     order.status = ManagedOrderStatus.PART_MATCHED_CANCELED
@@ -369,15 +413,15 @@ class OrderManager:
                 order.off_chain_pending_shares = min(
                     order.off_chain_pending_shares, event.unmatched_shares
                 )
-                order.off_chain_invalid_shares = ZERO
-                if order.off_chain_matched_shares == ZERO:
+                order.off_chain_invalid_shares = _ZERO
+                if order.off_chain_matched_shares == _ZERO:
                     order.status = ManagedOrderStatus.ZERO_MATCHED
                 elif order.off_chain_matched_shares < _MATCHED_SHARES_RATE * order.shares:
                     order.status = ManagedOrderStatus.PART_MATCHED
                 else:
                     order.status = ManagedOrderStatus.FULL_MATCHED
 
-    async def handle_trade_event(self, event: MarketTradeEvent) -> None:
+    async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
@@ -405,30 +449,98 @@ class OrderManager:
                     created_ts_ms=event.exch_ts_ms,
                     updated_ts_ms=event.exch_ts_ms,
                     on_chain_pending_shares=event.shares,
-                    on_chain_settled_shares=ZERO,
-                    on_chain_failure_shares=ZERO,
+                    on_chain_settled_shares=_ZERO,
+                    on_chain_failure_shares=_ZERO,
                 )
 
             trade.updated_ts_ms = max(trade.updated_ts_ms, event.exch_ts_ms)
 
             if event.status == MarketTradeStatus.CONFIRMED:
                 trade.status = ManagedTradeStatus.SUCCESS
-                trade.on_chain_pending_shares = ZERO
+                trade.on_chain_pending_shares = _ZERO
                 trade.on_chain_settled_shares = trade.shares
-                trade.on_chain_failure_shares = ZERO
+                trade.on_chain_failure_shares = _ZERO
             elif event.status == MarketTradeStatus.FAILED:
                 trade.status = ManagedTradeStatus.FAILURE
-                trade.on_chain_pending_shares = ZERO
-                trade.on_chain_settled_shares = ZERO
+                trade.on_chain_pending_shares = _ZERO
+                trade.on_chain_settled_shares = _ZERO
                 trade.on_chain_failure_shares = trade.shares
             else:
                 trade.status = ManagedTradeStatus.PENDING
                 trade.on_chain_pending_shares = trade.shares
-                trade.on_chain_settled_shares = ZERO
-                trade.on_chain_failure_shares = ZERO
+                trade.on_chain_settled_shares = _ZERO
+                trade.on_chain_failure_shares = _ZERO
 
             order.trades[event.trade_id] = trade
             self._trades_by_trade_id[event.trade_id] = trade
+
+            if trade.status == ManagedTradeStatus.SUCCESS:
+                self._apply_confirmed_trade(
+                    event.token_id, event.side, event.shares, event.price, event.exch_ts_ms
+                )
+                return self._build_current_position_event(order.market, order.token)
+
+    def _apply_confirmed_trade(
+        self, token_id: str, side: Side, shares: float, price: float, ts_ms: int
+    ) -> None:
+        position = self._positions_by_token_id.get(token_id)
+        if position is None:
+            position = _Position(token_id=token_id)
+            self._positions_by_token_id[token_id] = position
+
+        if side == Side.BUY:
+            position.cost = round(position.cost + shares * price, 6)
+            position.shares = round(position.shares + shares, 6)
+            position.open_ts_ms = (
+                ts_ms if position.open_ts_ms is None else min(position.open_ts_ms, ts_ms)
+            )
+        else:
+            holding_before = position.shares
+            reduced_shares = min(shares, position.shares)
+            avg_price = position.avg_price or _ZERO
+            position.cost = round(position.cost - reduced_shares * avg_price, 6)
+            position.shares = round(position.shares - reduced_shares, 6)
+            if shares > reduced_shares:
+                logger.warning(
+                    "sell settled shares exceed holding: token=%s sell=%.6f holding=%.6f",
+                    token_id,
+                    shares,
+                    holding_before,
+                )
+
+        if position.shares <= _POSITION_SHARES_DUST:
+            position.cost = _ZERO
+            position.shares = _ZERO
+            position.open_ts_ms = None
+
+    def _build_current_position_event(self, market: Market, token: Token) -> CurrentPositionEvent:
+        position = self._positions_by_token_id.get(token.id)
+        holding_cost = position.cost if position is not None else _ZERO
+        holding_shares = position.shares if position is not None else _ZERO
+        holding_avg_price = position.avg_price if position is not None else None
+        holding_open_ts_ms = position.open_ts_ms if position is not None else None
+
+        opening_shares = _ZERO
+        closing_shares = _ZERO
+        for o in self._orders_by_local_id.values():
+            if o.token.id != token.id or not o.is_active:
+                continue
+            unsettled = o.off_chain_pending_shares + o.on_chain_pending_shares
+            if o.side == Side.BUY:
+                opening_shares = round(opening_shares + unsettled, 6)
+            else:
+                closing_shares = round(closing_shares + unsettled, 6)
+
+        return CurrentPositionEvent(
+            token=token,
+            market=market,
+            opening_shares=opening_shares,
+            holding_shares=holding_shares,
+            closing_shares=closing_shares,
+            holding_avg_price=holding_avg_price,
+            holding_cost=holding_cost,
+            holding_open_ts_ms=holding_open_ts_ms,
+        )
 
     def _track_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
         task = asyncio.create_task(coro, name=name)

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+from src.execution.manager import ManagedOrder, OrderManager
+
 from clients.polymarket_clob import TradeClient
 from enums import Side
-from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
-from execution.order_manager import ManagedOrder, OrderManager
-from execution.position_manager import PositionManager
+from events import CurrentPositionEvent, DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -32,23 +32,21 @@ class ExecutionEngine:
         self._replace_size_gap = replace_size_gap
 
         self.order_manager = OrderManager(maker_client, taker_client)
-        self.position_manager = PositionManager()
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
         await self.order_manager.handle_order_event(event)
 
-    async def handle_trade_event(self, event: MarketTradeEvent) -> None:
-        await self.order_manager.handle_trade_event(event)
-        await self.position_manager.handle_trade_event(event)
+    async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
+        return await self.order_manager.handle_trade_event(event)
 
     async def handle_desired_position(self, target: DesiredPositionEvent) -> None:
         async with self._lock:
-            position = await self.position_manager.position_for_token(target.token.id)
+            position = await self.order_manager.position_for_token(target.token)
             opening_shares, closing_shares = await self.order_manager.exposure_for_token(
                 target.token
             )
             current_shares = round(
-                position.holding_shares + opening_shares - closing_shares,
+                position.shares + opening_shares - closing_shares,
                 6,
             )
             target_shares = max(ZERO, round(target.shares, 6))
