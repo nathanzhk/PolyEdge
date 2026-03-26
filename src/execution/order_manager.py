@@ -20,18 +20,6 @@ _MATCHED_SHARES_RATE = 0.98
 
 
 @dataclass(slots=True)
-class AuditRecord:
-    ts_ms: int
-    message: str
-
-
-@dataclass(slots=True, frozen=True)
-class OrderExposure:
-    opening_shares: float = ZERO
-    closing_shares: float = ZERO
-
-
-@dataclass(slots=True)
 class ManagedOrder:
     local_id: str
     order_id: str | None
@@ -55,10 +43,7 @@ class ManagedOrder:
 
     trades: dict[str, ManagedTrade] = field(default_factory=dict)
     should_cancel: bool = False
-
-    replace_count: int = 0
-    cancel_attempts: int = 0
-    audit_records: list[AuditRecord] = field(default_factory=list)
+    audit_records: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def is_active(self) -> bool:
@@ -100,12 +85,7 @@ class ManagedOrder:
         return round(sum(trade.on_chain_failure_shares for trade in self.trades.values()), 6)
 
     def log(self, message: str) -> None:
-        self.audit_records.append(
-            AuditRecord(
-                ts_ms=now_ts_ms(),
-                message=message,
-            )
-        )
+        self.audit_records.append((now_ts_ms(), message))
 
 
 @dataclass(slots=True)
@@ -144,7 +124,6 @@ class OrderManager:
         self._cached_order_events_by_order_id: dict[str, list[MarketOrderEvent]] = {}
         self._cached_trade_events_by_order_id: dict[str, list[MarketTradeEvent]] = {}
 
-        self._pending_replace_count_by_token_id: dict[str, int] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def active_orders(self) -> list[ManagedOrder]:
@@ -157,7 +136,7 @@ class OrderManager:
                 return order
         return None
 
-    async def exposure_for_token(self, token: Token) -> OrderExposure:
+    async def exposure_for_token(self, token: Token) -> tuple[float, float]:
         opening_shares = ZERO
         closing_shares = ZERO
         for order in await self.active_orders():
@@ -168,42 +147,21 @@ class OrderManager:
                 opening_shares = round(opening_shares + unsettled_shares, 6)
             else:
                 closing_shares = round(closing_shares + unsettled_shares, 6)
-        return OrderExposure(opening_shares=opening_shares, closing_shares=closing_shares)
+        return opening_shares, closing_shares
 
     async def buy(
-        self,
-        market: Market,
-        token: Token,
-        shares: float,
-        price: float,
-        urgent: bool,
-        replace_count: int = 0,
+        self, market: Market, token: Token, shares: float, price: float, urgent: bool
     ) -> None:
-        await self._submit_order(Side.BUY, market, token, shares, price, urgent, replace_count)
+        await self._submit_order(Side.BUY, market, token, shares, price, urgent)
 
     async def sell(
-        self,
-        market: Market,
-        token: Token,
-        shares: float,
-        price: float,
-        urgent: bool,
-        replace_count: int = 0,
+        self, market: Market, token: Token, shares: float, price: float, urgent: bool
     ) -> None:
-        await self._submit_order(Side.SELL, market, token, shares, price, urgent, replace_count)
+        await self._submit_order(Side.SELL, market, token, shares, price, urgent)
 
     async def _submit_order(
-        self,
-        side: Side,
-        market: Market,
-        token: Token,
-        shares: float,
-        price: float,
-        urgent: bool,
-        replace_count: int = 0,
+        self, side: Side, market: Market, token: Token, shares: float, price: float, urgent: bool
     ) -> None:
-        async with self._lock:
-            replace_count = self._pending_replace_count_by_token_id.pop(token.id, replace_count)
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
         as_maker = not urgent
@@ -222,7 +180,6 @@ class OrderManager:
             off_chain_pending_shares=shares,
             off_chain_matched_shares=ZERO,
             off_chain_invalid_shares=ZERO,
-            replace_count=replace_count,
         )
         logger.info("submit order: %s", local_id)
         async with self._lock:
@@ -309,7 +266,6 @@ class OrderManager:
         order: ManagedOrder,
         *,
         reason: str,
-        next_replace_count: int | None = None,
     ) -> bool:
         logger.info("cancel order: %s => %s", order.local_id, order.order_id)
         async with self._lock:
@@ -322,8 +278,6 @@ class OrderManager:
             if not latest_order.is_active:
                 latest_order.log("cancel without active shares")
                 return True
-            if next_replace_count is not None:
-                self._pending_replace_count_by_token_id[latest_order.token.id] = next_replace_count
             if latest_order.order_id is None:
                 if latest_order.status == ManagedOrderStatus.SUBMITTING:
                     latest_order.should_cancel = True
@@ -345,7 +299,6 @@ class OrderManager:
             if latest_order.should_cancel:
                 return False
             latest_order.should_cancel = True
-            latest_order.cancel_attempts += 1
             latest_order.updated_ts_ms = now_ts_ms()
             latest_order.log(f"cancel requested: {reason}")
             order_id = latest_order.order_id

@@ -7,7 +7,7 @@ from enums import MarketTradeStatus, Side
 from events import MarketTradeEvent
 from utils.logger import get_logger
 
-logger = get_logger("TRADE")
+logger = get_logger("POSITION")
 
 ZERO = 0.0
 POSITION_EPSILON = 0.000001
