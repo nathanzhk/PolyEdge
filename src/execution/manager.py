@@ -11,6 +11,7 @@ from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Rol
 from events import CurrentPositionEvent, MarketOrderEvent, MarketTradeEvent
 from markets.base import Market, Token
 from utils.logger import get_logger
+from utils.notification import send_trade
 from utils.time import now_ts_ms
 
 logger = get_logger("TRADE")
@@ -35,11 +36,12 @@ class _Position:
     cost: float = _ZERO
     shares: float = _ZERO
     open_ts_ms: int | None = None
+    realized_pnl: float = _ZERO
 
     @property
-    def avg_price(self) -> float | None:
+    def avg_price(self) -> float:
         if self.shares <= _POSITION_SHARES_DUST:
-            return None
+            return _ZERO
         return round(self.cost / self.shares, 3)
 
     def snapshot(self) -> PositionSnapshot:
@@ -298,7 +300,7 @@ class OrderManager:
                 order.should_cancel = False
                 order.log("find should cancel")
 
-    async def cancel(self, local_id: str, order_id: str, *, reason: str) -> bool:
+    async def cancel(self, local_id: str, order_id: str | None, *, reason: str) -> bool:
         logger.info("cancel order: %s => %s", local_id, order_id)
         async with self._lock:
             if order_id is None:
@@ -320,6 +322,7 @@ class OrderManager:
                         order.local_id,
                         reason,
                     )
+                    return False
                 else:
                     order.log("unexpected status")
                     logger.warning(
@@ -335,8 +338,8 @@ class OrderManager:
             order.log(f"cancel requested: {reason}")
 
         self._track_background_task(
-            self._cancel_order_worker(order_id),
-            name=f"cancel-order-{order_id}",
+            self._cancel_order_worker(order.order_id),
+            name=f"cancel-order-{order.order_id}",
         )
         return True
 
@@ -475,8 +478,25 @@ class OrderManager:
             self._trades_by_trade_id[event.trade_id] = trade
 
             if trade.status == ManagedTradeStatus.SUCCESS:
+                position = self._positions_by_token_id.get(event.token_id)
+                realized_pnl = position.realized_pnl if position is not None else _ZERO
                 self._apply_confirmed_trade(
                     event.token_id, event.side, event.shares, event.price, event.exch_ts_ms
+                )
+                position = self._positions_by_token_id[event.token_id]
+                pnl = position.realized_pnl - realized_pnl if event.side == Side.SELL else None
+                self._track_background_task(
+                    asyncio.to_thread(
+                        send_trade,
+                        market_start_ms=order.market.start_ts_ms,
+                        market_end_ms=order.market.end_ts_ms,
+                        side=event.side,
+                        token=order.token.key,
+                        shares=event.shares,
+                        price=event.price,
+                        pnl=pnl,
+                    ),
+                    name=f"send-trade-{event.trade_id}",
                 )
                 return self._build_current_position_event(order.market, order.token)
 
@@ -500,6 +520,9 @@ class OrderManager:
             avg_price = position.avg_price or _ZERO
             position.cost = round(position.cost - reduced_shares * avg_price, 6)
             position.shares = round(position.shares - reduced_shares, 6)
+            position.realized_pnl = round(
+                position.realized_pnl + reduced_shares * (price - avg_price), 6
+            )
             if shares > reduced_shares:
                 logger.warning(
                     "sell settled shares exceed holding: token=%s sell=%.6f holding=%.6f",
@@ -514,11 +537,6 @@ class OrderManager:
             position.open_ts_ms = None
 
     def _build_current_position_event(self, market: Market, token: Token) -> CurrentPositionEvent:
-        position = self._positions_by_token_id.get(token.id)
-        holding_cost = position.cost if position is not None else _ZERO
-        holding_shares = position.shares if position is not None else _ZERO
-        holding_avg_price = position.avg_price if position is not None else None
-        holding_open_ts_ms = position.open_ts_ms if position is not None else None
 
         opening_shares = _ZERO
         closing_shares = _ZERO
@@ -531,19 +549,21 @@ class OrderManager:
             else:
                 closing_shares = round(closing_shares + unsettled, 6)
 
+        position = self._positions_by_token_id.get(token.id)
         return CurrentPositionEvent(
             token=token,
             market=market,
             opening_shares=opening_shares,
-            holding_shares=holding_shares,
+            holding_shares=position.shares if position is not None else _ZERO,
             closing_shares=closing_shares,
-            holding_avg_price=holding_avg_price,
-            holding_cost=holding_cost,
-            holding_open_ts_ms=holding_open_ts_ms,
+            holding_avg_price=position.avg_price if position is not None else None,
+            holding_cost=position.cost if position is not None else _ZERO,
+            holding_open_ts_ms=position.open_ts_ms if position is not None else None,
+            realized_pnl=position.realized_pnl if position is not None else _ZERO,
         )
 
-    def _track_background_task(self, coro: Coroutine[Any, Any, None], *, name: str) -> None:
-        task = asyncio.create_task(coro, name=name)
+    def _track_background_task(self, coroutine: Coroutine[Any, Any, None], *, name: str) -> None:
+        task = asyncio.create_task(coroutine, name=name)
         self._background_tasks.add(task)
         task.add_done_callback(self._on_background_task_done)
 

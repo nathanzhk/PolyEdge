@@ -15,3 +15,4 @@ class CurrentPositionEvent:
     holding_cost: float = 0.0
     holding_avg_price: float | None = None
     holding_open_ts_ms: int | None = None
+    realized_pnl: float = 0.0

@@ -10,6 +10,7 @@ from event_bus import EventBus, OverflowPolicy, Subscription
 from events import CurrentPositionEvent, DesiredPositionEvent, MarketQuoteEvent
 from markets.base import Market, Token
 from utils.logger import get_logger
+from utils.notification import send_trade
 from utils.time import now_ts_ms
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class _PaperPosition:
     holding_shares: float = ZERO
     holding_cost: float = ZERO
     holding_open_ts_ms: int | None = None
+    realized_pnl: float = ZERO
 
     @property
     def holding_avg_price(self) -> float | None:
@@ -236,6 +238,7 @@ class PaperExecutionEngine:
         price = self._fill_price(order, quote)
         shares = order.shares
         position = self._position_for(order.market, order.token)
+        rpnl_before = position.realized_pnl
 
         if order.side == Side.BUY:
             position.holding_cost = round(position.holding_cost + shares * price, 6)
@@ -245,6 +248,9 @@ class PaperExecutionEngine:
         else:
             shares = min(shares, position.holding_shares)
             avg_price = position.holding_avg_price or ZERO
+            position.realized_pnl = round(
+                position.realized_pnl + shares * (price - avg_price), 6
+            )
             position.holding_cost = round(position.holding_cost - shares * avg_price, 6)
             position.holding_shares = round(position.holding_shares - shares, 6)
 
@@ -252,6 +258,17 @@ class PaperExecutionEngine:
             position.holding_shares = ZERO
             position.holding_cost = ZERO
             position.holding_open_ts_ms = None
+
+        pnl = position.realized_pnl - rpnl_before if order.side == Side.SELL else None
+        send_trade(
+            market_start_ms=order.market.start_ts_ms,
+            market_end_ms=order.market.end_ts_ms,
+            side=order.side,
+            token=order.token.key,
+            shares=shares,
+            price=price,
+            pnl=pnl,
+        )
 
         logger.info(
             "fill %s %s %.6f @ %.3f holding=%.6f avg=%s",
@@ -289,6 +306,8 @@ class PaperExecutionEngine:
             holding_avg_price=holding_avg_price,
         )
 
+        realized_pnl = position.realized_pnl if position is not None else ZERO
+
         return CurrentPositionEvent(
             market=market,
             token=token,
@@ -300,6 +319,7 @@ class PaperExecutionEngine:
             holding_avg_price=holding_avg_price,
             holding_cost=round(holding_cost, 6),
             holding_open_ts_ms=holding_open_ts_ms,
+            realized_pnl=round(realized_pnl, 6),
         )
 
     def _market_for_position_event(

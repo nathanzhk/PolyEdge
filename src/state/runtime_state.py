@@ -190,6 +190,7 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
                 position.holding_cost,
                 position.holding_avg_price,
                 position.holding_open_ts_ms,
+                position.realized_pnl,
             )
             for position in event.positions
         ),
@@ -223,6 +224,45 @@ def _log_event(event: RuntimeStateEvent) -> None:
         event.crypto_quote.mid,
         _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
     )
+    _log_positions(event)
+
+
+def _log_positions(event: RuntimeStateEvent) -> None:
+    if not event.positions:
+        return
+    bid_by_token_id = {
+        event.market.yes_token.id: event.yes_token_quote.best_bid,
+        event.market.no_token.id: event.no_token_quote.best_bid,
+    }
+    total_realized = 0.0
+    total_unrealized = 0.0
+    for position in event.positions:
+        bid = bid_by_token_id.get(position.token.id)
+        if bid is None:
+            continue
+        unrealized = (
+            position.holding_shares * bid - position.holding_cost
+            if position.holding_shares > 0
+            else 0.0
+        )
+        total_realized += position.realized_pnl
+        total_unrealized += unrealized
+        if position.holding_shares > 0 or position.realized_pnl != 0.0:
+            logger.info(
+                "  %s %.2f@%.2f cost=%.2f uPnL=%.2f rPnL=%.2f",
+                position.token.key,
+                position.holding_shares,
+                position.holding_avg_price,
+                position.holding_cost,
+                _fmt_signed_usd(unrealized),
+                _fmt_signed_usd(position.realized_pnl),
+            )
+    if total_unrealized != 0.0 or total_realized != 0.0:
+        logger.info(
+            "  total uPnL=%.2f rPnL=%.2f",
+            _fmt_signed_usd(total_unrealized),
+            _fmt_signed_usd(total_realized),
+        )
 
 
 def _fmt_signed_usd(value: float) -> str:
