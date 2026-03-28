@@ -66,8 +66,8 @@ class ManagedOrder:
     shares: float
 
     side: Side
+    role: Role
     price: float
-    as_maker: bool
 
     created_ts_ms: int
     updated_ts_ms: int
@@ -197,6 +197,7 @@ class OrderManager:
     ) -> None:
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
+        as_maker = not force and shares >= 5.0
         order = ManagedOrder(
             local_id=local_id,
             order_id=None,
@@ -205,8 +206,8 @@ class OrderManager:
             status=ManagedOrderStatus.SUBMITTING,
             shares=shares,
             side=side,
+            role=Role.MAKER if as_maker else Role.TAKER,
             price=price,
-            as_maker=not force,
             created_ts_ms=now,
             updated_ts_ms=now,
             off_chain_pending_shares=shares,
@@ -228,7 +229,7 @@ class OrderManager:
             order = self._orders_by_local_id.get(local_id)
             if order is None:
                 return
-            client = self._maker_client if order.as_maker else self._taker_client
+            client = self._maker_client if order.role == Role.MAKER else self._taker_client
             submit_order_func = client.buy if order.side == Side.BUY else client.sell
             token = order.token
             shares = order.shares
