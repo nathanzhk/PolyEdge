@@ -32,9 +32,9 @@ class StrategyComponent:
     async def _strategy_loop(self, events: Subscription[RuntimeStateEvent]) -> None:
         async for runtime_state in events:
             try:
-                position_event = await self._engine.evaluate(runtime_state)
-                if position_event is not None:
-                    await self._bus.publish(position_event)
+                desired_position_event = await self._engine.evaluate(runtime_state)
+                if desired_position_event is not None:
+                    await self._bus.publish(desired_position_event)
             except Exception:
                 raise
 
