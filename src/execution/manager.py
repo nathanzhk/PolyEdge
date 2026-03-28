@@ -160,6 +160,18 @@ class OrderManager:
                 return PositionSnapshot(token_id=token.id)
             return position.snapshot()
 
+    async def exposure_for_token(self, token: Token) -> tuple[float, float]:
+        opening_shares = _ZERO
+        closing_shares = _ZERO
+        for order in await self.active_orders():
+            if order.token.id != token.id:
+                continue
+            if order.side == Side.BUY:
+                opening_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
+            else:
+                closing_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
+        return round(opening_shares, 6), round(closing_shares, 6)
+
     async def active_orders(self) -> list[ManagedOrder]:
         async with self._lock:
             return [order for order in self._orders_by_local_id.values() if order.is_active]
@@ -170,31 +182,18 @@ class OrderManager:
                 return order
         return None
 
-    async def exposure_for_token(self, token: Token) -> tuple[float, float]:
-        opening_shares = _ZERO
-        closing_shares = _ZERO
-        for order in await self.active_orders():
-            if order.token.id != token.id:
-                continue
-            unsettled_shares = order.off_chain_pending_shares + order.on_chain_pending_shares
-            if order.side == Side.BUY:
-                opening_shares = round(opening_shares + unsettled_shares, 6)
-            else:
-                closing_shares = round(closing_shares + unsettled_shares, 6)
-        return opening_shares, closing_shares
-
     async def buy(
-        self, market: Market, token: Token, shares: float, price: float, urgent: bool
+        self, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:
-        await self._submit_order(Side.BUY, market, token, shares, price, urgent)
+        await self._submit_order(Side.BUY, market, token, shares, price, force)
 
     async def sell(
-        self, market: Market, token: Token, shares: float, price: float, urgent: bool
+        self, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:
-        await self._submit_order(Side.SELL, market, token, shares, price, urgent)
+        await self._submit_order(Side.SELL, market, token, shares, price, force)
 
     async def _submit_order(
-        self, side: Side, market: Market, token: Token, shares: float, price: float, urgent: bool
+        self, side: Side, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:
         now = now_ts_ms()
         local_id = uuid.uuid4().hex
@@ -207,7 +206,7 @@ class OrderManager:
             shares=shares,
             side=side,
             price=price,
-            as_maker=not urgent,
+            as_maker=not force,
             created_ts_ms=now,
             updated_ts_ms=now,
             off_chain_pending_shares=shares,
@@ -310,12 +309,14 @@ class OrderManager:
             if order is None:
                 return False
             if not order.is_active:
+                order.log(f"cancel requested: {reason}")
                 order.log("cancel without active shares")
                 return True
             if order.order_id is None:
                 if order.status == ManagedOrderStatus.SUBMITTING:
                     order.should_cancel = True
                     order.updated_ts_ms = now_ts_ms()
+                    order.log(f"cancel requested: {reason}")
                     order.log("cancel while submitting")
                     logger.info(
                         "order should cancel until submit returns: %s (%s)",
@@ -324,6 +325,7 @@ class OrderManager:
                     )
                     return False
                 else:
+                    order.log(f"cancel requested: {reason}")
                     order.log("unexpected status")
                     logger.warning(
                         "unexpected order status without order id: %s %s",
@@ -332,6 +334,8 @@ class OrderManager:
                     )
                 return False
             if order.should_cancel:
+                order.log(f"cancel requested: {reason}")
+                order.log("already marked should cancel")
                 return False
             order.updated_ts_ms = now_ts_ms()
             order.is_cancelling = True
@@ -540,22 +544,21 @@ class OrderManager:
 
         opening_shares = _ZERO
         closing_shares = _ZERO
-        for o in self._orders_by_local_id.values():
-            if o.token.id != token.id or not o.is_active:
+        for order in self._orders_by_local_id.values():
+            if order.token.id != token.id or not order.is_active:
                 continue
-            unsettled = o.off_chain_pending_shares + o.on_chain_pending_shares
-            if o.side == Side.BUY:
-                opening_shares = round(opening_shares + unsettled, 6)
+            if order.side == Side.BUY:
+                opening_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
             else:
-                closing_shares = round(closing_shares + unsettled, 6)
+                closing_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
 
         position = self._positions_by_token_id.get(token.id)
         return CurrentPositionEvent(
             token=token,
             market=market,
-            opening_shares=opening_shares,
+            opening_shares=round(opening_shares, 6),
             holding_shares=position.shares if position is not None else _ZERO,
-            closing_shares=closing_shares,
+            closing_shares=round(closing_shares, 6),
             holding_avg_price=position.avg_price if position is not None else None,
             holding_cost=position.cost if position is not None else _ZERO,
             holding_open_ts_ms=position.open_ts_ms if position is not None else None,

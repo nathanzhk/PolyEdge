@@ -17,70 +17,56 @@ SHARES_EPSILON = 0.000001
 
 
 class ExecutionEngine:
-    def __init__(
-        self,
-        maker_client: TradeClient,
-        taker_client: TradeClient,
-        *,
-        order_ttl_s: float = 2.0,
-        replace_price_gap: float = 0.05,
-        replace_size_gap: float = 0.1,
-    ) -> None:
+    def __init__(self, maker_client: TradeClient, taker_client: TradeClient) -> None:
         self._lock = asyncio.Lock()
-        self._order_ttl_s = order_ttl_s
-        self._replace_price_gap = replace_price_gap
-        self._replace_size_gap = replace_size_gap
+        self._replace_ttl_s = 2.00
+        self._replace_price_gap = 0.05
+        self._replace_shares_gap = 0.10
 
-        self.order_manager = OrderManager(maker_client, taker_client)
+        self._order_manager = OrderManager(maker_client, taker_client)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
-        await self.order_manager.handle_order_event(event)
+        await self._order_manager.handle_order_event(event)
 
     async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
-        return await self.order_manager.handle_trade_event(event)
+        return await self._order_manager.handle_trade_event(event)
 
-    async def handle_desired_position(self, target: DesiredPositionEvent) -> None:
+    async def handle_desired_position(self, desired_position: DesiredPositionEvent) -> None:
         async with self._lock:
-            position = await self.order_manager.position_for_token(target.token)
-            opening_shares, closing_shares = await self.order_manager.exposure_for_token(
-                target.token
+            current_position = await self._order_manager.position_for_token(desired_position.token)
+            holding_shares = current_position.shares
+            opening_shares, closing_shares = await self._order_manager.exposure_for_token(
+                desired_position.token
             )
-            current_shares = round(
-                position.shares + opening_shares - closing_shares,
-                6,
-            )
-            target_shares = max(ZERO, round(target.shares, 6))
-            active_order = await self.order_manager.active_order_for_token(target.token)
 
-            if active_order is not None and active_order.should_cancel:
-                return
+            desired_shares = round(desired_position.shares, 6)
+            current_shares = round(opening_shares + holding_shares - closing_shares, 6)
 
-            if target_shares > current_shares + SHARES_EPSILON:
-                delta = round(target_shares - current_shares, 6)
+            active_order = await self._order_manager.active_order_for_token(desired_position.token)
+
+            if desired_shares > current_shares:
+                delta = round(desired_shares - current_shares, 6)
                 await self._reconcile_order(
-                    target,
+                    desired_position,
                     side=Side.BUY,
                     shares=delta,
                     active_order=active_order,
                 )
                 return
 
-            if target_shares < current_shares - SHARES_EPSILON:
-                delta = round(current_shares - target_shares, 6)
+            if desired_shares < current_shares:
+                delta = round(current_shares - desired_shares, 6)
                 await self._reconcile_order(
-                    target,
+                    desired_position,
                     side=Side.SELL,
                     shares=delta,
                     active_order=active_order,
                 )
                 return
 
-            if active_order is not None:
-                await self.order_manager.cancel(active_order, reason="target reached")
-
     async def _reconcile_order(
         self,
-        target: DesiredPositionEvent,
+        desired_position: DesiredPositionEvent,
         *,
         side: Side,
         shares: float,
@@ -88,36 +74,37 @@ class ExecutionEngine:
     ) -> None:
         if active_order is None:
             if side == Side.BUY:
-                await self.order_manager.buy(
-                    target.market,
-                    target.token,
+                await self._order_manager.buy(
+                    desired_position.market,
+                    desired_position.token,
                     shares,
-                    target.price,
-                    target.force,
+                    desired_position.price,
+                    desired_position.force,
                 )
             else:
-                await self.order_manager.sell(
-                    target.market,
-                    target.token,
+                await self._order_manager.sell(
+                    desired_position.market,
+                    desired_position.token,
                     shares,
-                    target.price,
-                    target.force,
+                    desired_position.price,
+                    desired_position.force,
                 )
             return
 
         if active_order.side != side:
-            await self.order_manager.cancel(
-                active_order,
+            await self._order_manager.cancel(
+                active_order.local_id,
+                active_order.order_id,
                 reason="target side changed",
             )
             return
 
         now = now_ts_ms()
         age_s = (now - active_order.created_ts_ms) / 1000
-        price_moved = abs(active_order.price - target.price) >= self._replace_price_gap
-        size_changed = abs(active_order.shares - shares) >= self._replace_size_gap
-        ttl_expired = not target.force and age_s >= self._order_ttl_s
-        if not price_moved and not size_changed and not ttl_expired:
+        ttl_expired = not desired_position.force and age_s >= self._replace_ttl_s
+        price_moved = abs(active_order.price - desired_position.price) >= self._replace_price_gap
+        shares_changed = abs(active_order.shares - shares) >= self._replace_shares_gap
+        if not ttl_expired and not price_moved and not shares_changed:
             return
 
         if ttl_expired:
@@ -125,7 +112,7 @@ class ExecutionEngine:
         elif price_moved:
             reason = "price changed"
         else:
-            reason = "size changed"
+            reason = "shares changed"
         logger.info(
             "%s: cancel order %s for replace %.6f @ %.2f -> %.6f @ %.2f",
             reason,
@@ -133,9 +120,10 @@ class ExecutionEngine:
             active_order.shares,
             active_order.price,
             shares,
-            target.price,
+            desired_position.price,
         )
-        await self.order_manager.cancel(
-            active_order,
+        await self._order_manager.cancel(
+            active_order.local_id,
+            active_order.order_id,
             reason=reason,
         )
