@@ -7,3 +7,10 @@ python.uv_venv_auto = "source"
 
 [tasks.start]
 run = "PYTHONPATH=src uv run python -m main"
+
+[tasks.download]
+run = """
+START={{arg(i=0, name='start')}}
+END={{arg(i=1, name='end', default='')}}
+cd data/scripts && PYTHONPATH=../../src uv run python download_batch.py "$START" "${END:-$START}"
+"""
