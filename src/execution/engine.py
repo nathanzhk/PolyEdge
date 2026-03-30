@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from src.execution.manager import ManagedOrder, OrderManager
-
 from clients.polymarket_clob import TradeClient
 from enums import Side
 from events import CurrentPositionEvent, DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
+from execution.manager import ManagedOrder, OrderManager
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -33,16 +32,17 @@ class ExecutionEngine:
 
     async def handle_desired_position(self, desired_position: DesiredPositionEvent) -> None:
         async with self._lock:
-            current_position = await self._order_manager.position_for_token(desired_position.token)
-            holding_shares = current_position.shares
-            opening_shares, closing_shares = await self._order_manager.exposure_for_token(
-                desired_position.token
+            current_position, active_order = await self._order_manager.get_position_by_token(
+                desired_position.market, desired_position.token
             )
 
             desired_shares = round(desired_position.shares, 6)
-            current_shares = round(opening_shares + holding_shares - closing_shares, 6)
-
-            active_order = await self._order_manager.active_order_for_token(desired_position.token)
+            current_shares = round(
+                current_position.opening_shares
+                + current_position.holding_shares
+                - current_position.closing_shares,
+                6,
+            )
 
             if desired_shares > current_shares:
                 delta = round(desired_shares - current_shares, 6)

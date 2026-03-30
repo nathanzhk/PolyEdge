@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 import orjson
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
 from events import MarketQuoteEvent
-from markets.base import Market
+from markets.base import Market, Token
 from utils.env import Env
 from utils.logger import get_logger
 from utils.time import sleep_until
@@ -20,14 +21,23 @@ _PING_INTERVAL_S = 10
 logger = get_logger("MARKET QUOTE")
 
 
+@dataclass(slots=True, frozen=True)
+class _MarketContext:
+    yes_token: Token
+    no_token: Token
+    market: Market
+
+
 class MarketQuoteStream:
     def __init__(self, market_type: type[Market]) -> None:
         market = market_type.curr_market()
         if market is None:
             raise ValueError("cannot load current market")
-        self._yes_token = market.yes_token
-        self._no_token = market.no_token
-        self._market = market
+        self._ctx = _MarketContext(
+            yes_token=market.yes_token,
+            no_token=market.no_token,
+            market=market,
+        )
 
     def __aiter__(self) -> AsyncIterator[MarketQuoteEvent]:
         return self._stream()
@@ -44,7 +54,7 @@ class MarketQuoteStream:
                     max_size=None,
                 ) as ws:
                     ws_lock = asyncio.Lock()
-                    await _initial_subscribe(ws, self._market)
+                    await _initial_subscribe(ws, self._ctx.market)
                     logger.info("connected market quote websocket")
                     heartbeat_task = asyncio.create_task(self._heartbeat(ws, ws_lock))
                     lifecycle_task = asyncio.create_task(self._lifecycle(ws, ws_lock))
@@ -82,19 +92,21 @@ class MarketQuoteStream:
         except Exception:
             return None
 
-        if market_id != self._market.id:
+        ctx = self._ctx
+
+        if market_id != ctx.market.id:
             return None
 
-        if token_id == self._yes_token.id:
-            token = self._yes_token
-        elif token_id == self._no_token.id:
-            token = self._no_token
+        if token_id == ctx.yes_token.id:
+            token = ctx.yes_token
+        elif token_id == ctx.no_token.id:
+            token = ctx.no_token
         else:
             return None
 
         return MarketQuoteEvent(
             exch_ts_ms=ts_ms,
-            market=self._market,
+            market=ctx.market,
             token=token,
             best_bid=round(best_bid, 3),
             best_ask=round(best_ask, 3),
@@ -111,15 +123,17 @@ class MarketQuoteStream:
 
     async def _lifecycle(self, ws: ClientConnection, ws_lock: asyncio.Lock) -> None:
         while True:
-            curr_market = self._market
+            curr_market = self._ctx.market
             await sleep_until(curr_market.end_ts_s - _SWITCH_BEFORE_END_S)
             await _update_subscribe(ws, ws_lock, "unsubscribe", curr_market)
             next_market = await asyncio.to_thread(curr_market.next_market)
             if next_market is None:
                 raise ValueError("cannot load next market")
-            self._yes_token = next_market.yes_token
-            self._no_token = next_market.no_token
-            self._market = next_market
+            self._ctx = _MarketContext(
+                yes_token=next_market.yes_token,
+                no_token=next_market.no_token,
+                market=next_market,
+            )
             await _update_subscribe(ws, ws_lock, "subscribe", next_market)
             logger.debug("switch market from %s to %s", curr_market.slug, next_market.slug)
 

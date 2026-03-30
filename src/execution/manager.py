@@ -21,15 +21,6 @@ _MATCHED_SHARES_RATE = 0.98
 _POSITION_SHARES_DUST = 0.02
 
 
-@dataclass(slots=True, frozen=True)
-class PositionSnapshot:
-    token_id: str
-    cost: float = _ZERO
-    shares: float = _ZERO
-    avg_price: float = _ZERO
-    open_ts_ms: int | None = None
-
-
 @dataclass(slots=True)
 class _Position:
     token_id: str
@@ -43,15 +34,6 @@ class _Position:
         if self.shares <= _POSITION_SHARES_DUST:
             return _ZERO
         return round(self.cost / self.shares, 3)
-
-    def snapshot(self) -> PositionSnapshot:
-        return PositionSnapshot(
-            token_id=self.token_id,
-            cost=self.cost,
-            shares=self.shares,
-            avg_price=self.avg_price,
-            open_ts_ms=self.open_ts_ms,
-        )
 
 
 @dataclass(slots=True)
@@ -153,35 +135,6 @@ class OrderManager:
 
         self._background_tasks: set[asyncio.Task[None]] = set()
 
-    async def position_for_token(self, token: Token) -> PositionSnapshot:
-        async with self._lock:
-            position = self._positions_by_token_id.get(token.id)
-            if position is None:
-                return PositionSnapshot(token_id=token.id)
-            return position.snapshot()
-
-    async def exposure_for_token(self, token: Token) -> tuple[float, float]:
-        opening_shares = _ZERO
-        closing_shares = _ZERO
-        for order in await self.active_orders():
-            if order.token.id != token.id:
-                continue
-            if order.side == Side.BUY:
-                opening_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
-            else:
-                closing_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
-        return round(opening_shares, 6), round(closing_shares, 6)
-
-    async def active_orders(self) -> list[ManagedOrder]:
-        async with self._lock:
-            return [order for order in self._orders_by_local_id.values() if order.is_active]
-
-    async def active_order_for_token(self, token: Token) -> ManagedOrder | None:
-        for order in await self.active_orders():
-            if order.token.id == token.id:
-                return order
-        return None
-
     async def buy(
         self, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:
@@ -191,6 +144,17 @@ class OrderManager:
         self, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:
         await self._submit_order(Side.SELL, market, token, shares, price, force)
+
+    async def get_position_by_token(
+        self, market: Market, token: Token
+    ) -> tuple[CurrentPositionEvent, ManagedOrder | None]:
+        async with self._lock:
+            active_order: ManagedOrder | None = None
+            for order in self._orders_by_local_id.values():
+                if order.is_active and order.token.id == token.id:
+                    active_order = order
+                    break
+            return self._build_current_position_event(market, token), active_order
 
     async def _submit_order(
         self, side: Side, market: Market, token: Token, shares: float, price: float, force: bool
