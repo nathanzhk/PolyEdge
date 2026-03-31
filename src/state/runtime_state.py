@@ -249,7 +249,7 @@ def _log_positions(event: RuntimeStateEvent) -> None:
         total_unrealized += unrealized
         if position.holding_shares > 0 or position.realized_pnl != 0.0:
             logger.info(
-                "holding %s %.2f @ %.2f cost=%.2f uPnL=%.2f rPnL=%.2f",
+                "holding %s %.2f @ %.2f cost=%.2f uPnL=%s rPnL=%s",
                 position.token.key,
                 position.holding_shares,
                 position.holding_avg_price,
@@ -259,7 +259,7 @@ def _log_positions(event: RuntimeStateEvent) -> None:
             )
     if total_unrealized != 0.0 or total_realized != 0.0:
         logger.info(
-            "  total uPnL=%.2f rPnL=%.2f",
+            "  total uPnL=%s rPnL=%s",
             _fmt_signed_usd(total_unrealized),
             _fmt_signed_usd(total_realized),
         )

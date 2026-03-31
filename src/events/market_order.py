@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from time import perf_counter_ns
 
-from enums import MarketOrderStatus, OrderType, Side
+from enums import MarketOrderStatus, MarketOrderType, Side
 from utils.time import now_ts_ms
 
 
@@ -18,7 +18,7 @@ class MarketOrderEvent:
     shares: float
 
     side: Side
-    type: OrderType
+    type: MarketOrderType
     price: float
 
     matched_shares: float

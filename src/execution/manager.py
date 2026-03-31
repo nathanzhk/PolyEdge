@@ -14,7 +14,7 @@ from utils.logger import get_logger
 from utils.notification import send_trade
 from utils.time import now_ts_ms
 
-logger = get_logger("TRADE")
+logger = get_logger("MANAGER")
 
 _ZERO = 0.0
 _MATCHED_SHARES_RATE = 0.98
@@ -265,7 +265,7 @@ class OrderManager:
                 order.log("find should cancel")
 
     async def cancel(self, local_id: str, order_id: str | None, *, reason: str) -> bool:
-        logger.info("cancel order: %s => %s", local_id, order_id)
+        logger.info("cancel order: (%s) %s => %s", reason, local_id, order_id)
         async with self._lock:
             if order_id is None:
                 order = self._orders_by_local_id.get(local_id)
@@ -298,9 +298,9 @@ class OrderManager:
                         order.status,
                     )
                 return False
-            if order.should_cancel:
+            if order.is_cancelling or order.should_cancel:
                 order.log(f"cancel requested: {reason}")
-                order.log("already marked should cancel")
+                order.log("cancel already in progress")
                 return False
             order.updated_ts_ms = now_ts_ms()
             order.is_cancelling = True

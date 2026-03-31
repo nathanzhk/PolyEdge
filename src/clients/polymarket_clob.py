@@ -1,6 +1,5 @@
 import time
 from collections.abc import Mapping
-from enum import StrEnum
 from typing import Any
 
 from py_clob_client.client import ClobClient
@@ -10,28 +9,25 @@ from py_clob_client.clob_types import (
     BalanceAllowanceParams,
     OpenOrderParams,
     OrderArgs,
+    OrderType,
 )
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
-from enums import MarketOrderStatus, OrderType, Side
+from enums import MarketOrderStatus, MarketOrderType, Role, Side
 from markets.base import Market, Token
 from markets.order import MarketOrder
 from utils.env import Env
 from utils.logger import get_logger
 
 
-class _Role(StrEnum):
-    MAKER = "maker"
-    TAKER = "taker"
-
-
 class TradeClient:
-    role: _Role
+    role: Role
     post_only: bool
+    order_type: OrderType
 
     def __init__(self) -> None:
-        self.logger = get_logger(self.role.upper())
+        self.logger = get_logger(self.role)
         self.client = ClobClient(
             Env.POLYMARKET_CLOB_BASE_URL,
             key=Env.POLYMARKET_PRIVATE_KEY,
@@ -55,9 +51,9 @@ class TradeClient:
         self._warm_up_token(market.no_token)
 
     def fee_rate(self, market: Market) -> float:
-        if self.role == _Role.MAKER:
+        if self.role == Role.MAKER:
             return 0.0
-        if self.role == _Role.TAKER:
+        if self.role == Role.TAKER:
             return market.fee_rate
         raise ValueError(f"invalid role: {self.role}")
 
@@ -185,7 +181,9 @@ class TradeClient:
 
             submit_start_ns = time.perf_counter_ns()
             try:
-                resp = self.client.post_order(order, post_only=self.post_only)
+                resp = self.client.post_order(
+                    order, post_only=self.post_only, orderType=self.order_type
+                )
                 self.logger.debug("%r", resp)
             finally:
                 submit_latency_ms = (time.perf_counter_ns() - submit_start_ns) / 1_000_000
@@ -214,20 +212,22 @@ class TradeClient:
 
 
 class MakerTradeClient(TradeClient):
-    role = _Role.MAKER
-    post_only = True
+    role: Role = Role.MAKER
+    post_only: bool = True
+    order_type: OrderType = OrderType.GTC
 
 
 class TakerTradeClient(TradeClient):
-    role = _Role.TAKER
-    post_only = False
+    role: Role = Role.TAKER
+    post_only: bool = False
+    order_type: OrderType = OrderType.FOK
 
 
 def _parse_market_order(data: Mapping[str, Any]) -> MarketOrder:
     return MarketOrder(
         id=data["id"],
         side=Side(data["side"]),
-        type=OrderType(data["order_type"]),
+        type=MarketOrderType(data["order_type"]),
         status=MarketOrderStatus(data["status"]),
         ordered_shares=round(float(data["original_size"]), 6),
         matched_shares=round(float(data["size_matched"]), 6),

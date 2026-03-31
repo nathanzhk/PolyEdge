@@ -9,7 +9,7 @@ from py_clob_client.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
-from enums import MarketOrderStatus, MarketTradeStatus, OrderType, Role, Side
+from enums import MarketOrderStatus, MarketOrderType, MarketTradeStatus, Role, Side
 from events import MarketOrderEvent, MarketTradeEvent
 from utils.env import Env
 from utils.logger import get_logger
@@ -93,7 +93,7 @@ def _build_order_event(message: dict) -> MarketOrderEvent | None:
             status=MarketOrderStatus(str(message["status"]).upper()),
             shares=round(float(message["original_size"]), 6),
             side=Side(str(message["side"]).upper()),
-            type=OrderType(str(message["order_type"]).upper()),
+            type=MarketOrderType(str(message["order_type"]).upper()),
             price=round(float(message["price"]), 3),
             matched_shares=round(float(message["size_matched"]), 6),
         )

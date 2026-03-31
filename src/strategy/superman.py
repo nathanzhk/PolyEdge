@@ -30,7 +30,7 @@ class _Config:
     neutral_lo: float = 0.40
     neutral_hi: float = 0.60
     max_ask: float = 0.65
-    entry_shares: float = 5.0
+    entry_shares: float = 5.02
 
 
 class SupermanStrategy:
