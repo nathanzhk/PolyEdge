@@ -21,15 +21,16 @@ class _PositionStatus(IntEnum):
 
 @dataclass(slots=True, frozen=True)
 class _Config:
-    observe_min_sec: float = 5.0
-    observe_max_sec: float = 120.0
-    maker_exit_sec: float = 90.0
-    taker_exit_sec: float = 120.0
-    min_btc_move: float = 15.0
-    max_btc_move: float = 1000.0
+    observe_min_sec: float = 10.0
+    observe_max_sec: float = 30.0
+    maker_exit_sec: float = 90.0  # entry-relative
+    taker_exit_sec: float = 100.0  # entry-relative
+    min_btc_move: float = 10.0
+    max_btc_move: float = 999.0
     neutral_lo: float = 0.40
     neutral_hi: float = 0.60
-    entry_shares: float = 5.02
+    max_ask: float = 0.65
+    entry_shares: float = 5.0
 
 
 class SupermanStrategy:
@@ -74,7 +75,6 @@ class SupermanStrategy:
                     yes_quote,
                     no_quote,
                     active_position,
-                    elapsed_s,
                 )
             elif position_status == _PositionStatus.CLOSING:
                 return self._closing(
@@ -82,7 +82,6 @@ class SupermanStrategy:
                     yes_quote,
                     no_quote,
                     active_position,
-                    elapsed_s,
                 )
 
     def _observe(
@@ -100,7 +99,7 @@ class SupermanStrategy:
             logger.info("elapsed_s > %ds", self.config.observe_max_sec)
             return None
 
-        token = self._check_signal(market, btc_diff, yes_quote)
+        token = self._check_signal(market, btc_diff, yes_quote, no_quote)
         if token is None:
             return None
 
@@ -121,11 +120,8 @@ class SupermanStrategy:
         position: CurrentPositionEvent,
         elapsed_s: float,
     ):
-        if (
-            position.holding_open_ts_ms is not None
-            and now_ts_ms() - position.holding_open_ts_ms <= 3_000
-        ) or elapsed_s <= self.config.observe_max_sec:
-            token = self._check_signal(market, btc_diff, yes_quote)
+        if elapsed_s <= self.config.observe_max_sec:
+            token = self._check_signal(market, btc_diff, yes_quote, no_quote)
             if token is not None:
                 return DesiredPositionEvent(
                     market=market,
@@ -133,21 +129,12 @@ class SupermanStrategy:
                     shares=self.config.entry_shares,
                     price=_bid_for_token(yes_quote, no_quote, token),
                 )
-            else:
-                return DesiredPositionEvent(
-                    market=market,
-                    token=position.token,
-                    shares=position.opening_shares + position.holding_shares,
-                    price=position.holding_avg_price
-                    or _bid_for_token(yes_quote, no_quote, position.token),
-                )
-        else:
-            return DesiredPositionEvent(
-                market=market,
-                token=position.token,
-                shares=0.0,
-                price=_ask_for_token(yes_quote, no_quote, position.token),
-            )
+        return DesiredPositionEvent(
+            market=market,
+            token=position.token,
+            shares=0.0,
+            price=_ask_for_token(yes_quote, no_quote, position.token),
+        )
 
     def _holding(
         self,
@@ -155,9 +142,9 @@ class SupermanStrategy:
         yes_quote: MarketQuoteEvent,
         no_quote: MarketQuoteEvent,
         position: CurrentPositionEvent,
-        elapsed_s: float,
     ):
-        if elapsed_s > self.config.maker_exit_sec:
+        holding_s = _holding_elapsed_s(position, now_ts_ms())
+        if holding_s >= self.config.maker_exit_sec:
             return DesiredPositionEvent(
                 market=market,
                 token=position.token,
@@ -171,16 +158,9 @@ class SupermanStrategy:
         yes_quote: MarketQuoteEvent,
         no_quote: MarketQuoteEvent,
         position: CurrentPositionEvent,
-        elapsed_s: float,
     ):
-        if elapsed_s < self.config.taker_exit_sec:
-            return DesiredPositionEvent(
-                market=market,
-                token=position.token,
-                shares=0.0,
-                price=_ask_for_token(yes_quote, no_quote, position.token),
-            )
-        else:
+        holding_s = _holding_elapsed_s(position, now_ts_ms())
+        if holding_s >= self.config.taker_exit_sec:
             return DesiredPositionEvent(
                 market=market,
                 token=position.token,
@@ -188,12 +168,19 @@ class SupermanStrategy:
                 price=_ask_for_token(yes_quote, no_quote, position.token),
                 force=True,
             )
+        return DesiredPositionEvent(
+            market=market,
+            token=position.token,
+            shares=0.0,
+            price=_ask_for_token(yes_quote, no_quote, position.token),
+        )
 
     def _check_signal(
         self,
         market: Market,
         btc_diff: float,
         yes_quote: MarketQuoteEvent,
+        no_quote: MarketQuoteEvent,
     ) -> Token | None:
         abs_diff = abs(btc_diff)
         if abs_diff < self.config.min_btc_move:
@@ -213,7 +200,13 @@ class SupermanStrategy:
             )
             return None
 
-        return market.yes_token if btc_diff > 0 else market.no_token
+        token = market.yes_token if btc_diff > 0 else market.no_token
+        entry_ask = yes_quote.best_ask if btc_diff > 0 else no_quote.best_ask
+        if entry_ask > self.config.max_ask:
+            logger.debug("ask %.2f > max_ask %.2f", entry_ask, self.config.max_ask)
+            return None
+
+        return token
 
     def _get_position_status(
         self,
@@ -251,6 +244,12 @@ class SupermanStrategy:
 
 def _elapsed_s(market: Market, ts_ms: int) -> int:
     return (ts_ms - market.start_ts_ms) // 1000
+
+
+def _holding_elapsed_s(position: CurrentPositionEvent, ts_ms: int) -> float:
+    if position.holding_open_ts_ms is None:
+        return 0.0
+    return (ts_ms - position.holding_open_ts_ms) / 1000
 
 
 def _bid_for_token(
