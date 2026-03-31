@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 
-from enums import MarketOrderStatus, OrderType, Side
+from enums import MarketOrderStatus, MarketOrderType, Side
 
 
 @dataclass(slots=True, frozen=True)
 class MarketOrder:
     id: str
     side: Side
-    type: OrderType
+    type: MarketOrderType
     status: MarketOrderStatus
     ordered_shares: float
     matched_shares: float
