@@ -11,7 +11,7 @@ class Role(StrEnum):
     TAKER = "TAKER"
 
 
-class OrderType(StrEnum):
+class MarketOrderType(StrEnum):
     GTC = "GTC"
     GTD = "GTD"
     FOK = "FOK"
