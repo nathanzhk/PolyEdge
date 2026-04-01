@@ -236,6 +236,12 @@ class OrderManager:
             else:
                 await self.handle_trade_event(event)
 
+        if order.role == Role.TAKER:
+            self._track_background_task(
+                self._sync_order_status(order_id),
+                name=f"sync-order-{order_id}",
+            )
+
         if order.should_cancel:
             async with self._lock:
                 order = self._orders_by_order_id.get(order_id)
@@ -324,7 +330,7 @@ class OrderManager:
         if is_success:
             await self._handle_cancel_order_success(order_id)
         else:
-            await self._handle_cancel_order_failed(order_id, error_message)
+            await self._handle_cancel_order_failed(order_id, error_message.lower())
 
     async def _handle_cancel_order_success(self, order_id: str) -> None:
         logger.info("cancel order success: %s", order_id)
@@ -351,6 +357,49 @@ class OrderManager:
             order.updated_ts_ms = now_ts_ms()
             order.is_cancelling = False
             order.log(error_message)
+
+        if (
+            "matched orders can't be canceled" in error_message
+            or "already canceled or matched" in error_message
+        ):
+            self._track_background_task(
+                self._sync_order_status(order_id),
+                name=f"sync-order-{order_id}",
+            )
+
+    async def _sync_order_status(self, order_id: str) -> None:
+        market_order = await asyncio.to_thread(self._maker_client.get_order_by_id, order_id)
+        if market_order is None:
+            logger.warning("sync order status failed: %s", order_id)
+            return
+
+        async with self._lock:
+            order = self._orders_by_order_id.get(order_id)
+            if order is None:
+                return
+            market_id = order.market.id
+            token_id = order.token.id
+
+        event = MarketOrderEvent(
+            exch_ts_ms=now_ts_ms(),
+            market_id=market_id,
+            token_id=token_id,
+            order_id=order_id,
+            trade_ids=[],
+            status=market_order.status,
+            shares=market_order.ordered_shares,
+            side=market_order.side,
+            type=market_order.type,
+            price=market_order.price,
+            matched_shares=market_order.matched_shares,
+        )
+        logger.info(
+            "sync order event: %s status=%s matched=%.6f",
+            order_id,
+            event.status,
+            event.matched_shares,
+        )
+        await self.handle_order_event(event)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
         async with self._lock:
@@ -392,9 +441,11 @@ class OrderManager:
                     order.status = ManagedOrderStatus.PART_MATCHED
                 else:
                     order.status = ManagedOrderStatus.FULL_MATCHED
+                    order.off_chain_invalid_shares = order.off_chain_pending_shares
+                    order.off_chain_pending_shares = _ZERO
 
         logger.debug(
-            "order %s status=%s matched=%.2f matching=%.2f canceled=%.2f",
+            "order %s status=%s matching=%.6f matched=%.6f canceled=%.6f",
             order.order_id,
             order.status,
             order.off_chain_matched_shares,
@@ -476,6 +527,7 @@ class OrderManager:
                     ),
                     name=f"send-trade-{event.trade_id}",
                 )
+                logger.debug("trade %s settled %.6f", trade.order_id, trade.shares)
                 return self._build_current_position_event(order.market, order.token)
 
     def _apply_confirmed_trade(
@@ -519,12 +571,19 @@ class OrderManager:
         opening_shares = _ZERO
         closing_shares = _ZERO
         for order in self._orders_by_local_id.values():
-            if order.token.id != token.id or not order.is_active:
+            if order.token.id != token.id:
                 continue
-            if order.side == Side.BUY:
-                opening_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
-            else:
-                closing_shares += order.off_chain_pending_shares + order.on_chain_pending_shares
+            in_flight = (
+                order.off_chain_pending_shares
+                + order.off_chain_matched_shares
+                - order.on_chain_settled_shares
+                - order.on_chain_failure_shares
+            )
+            if in_flight > _ZERO:
+                if order.side == Side.BUY:
+                    opening_shares += in_flight
+                else:
+                    closing_shares += in_flight
 
         position = self._positions_by_token_id.get(token.id)
         return CurrentPositionEvent(
@@ -533,7 +592,7 @@ class OrderManager:
             opening_shares=round(opening_shares, 6),
             holding_shares=position.shares if position is not None else _ZERO,
             closing_shares=round(closing_shares, 6),
-            holding_avg_price=position.avg_price if position is not None else None,
+            holding_avg_price=position.avg_price if position is not None else _ZERO,
             holding_cost=position.cost if position is not None else _ZERO,
             holding_open_ts_ms=position.open_ts_ms if position is not None else None,
             realized_pnl=position.realized_pnl if position is not None else _ZERO,

@@ -27,6 +27,15 @@ _REPLACE_SHARES_GAP = 0.10
 _POSITION_SHARES_DUST = 0.02
 
 
+def _pick_price(desired: DesiredPositionEvent, side: Side, force: bool, shares: float) -> float:
+    """Maker buy → bid, maker sell → ask, taker buy → ask, taker sell → bid."""
+    as_maker = not force and shares >= 5.0
+    if side == Side.BUY:
+        return desired.best_bid if as_maker else desired.best_ask
+    else:
+        return desired.best_ask if as_maker else desired.best_bid
+
+
 class _PaperOrderStatus(StrEnum):
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
@@ -139,8 +148,9 @@ class PaperExecutionEngine:
         active_order: _PaperOrder | None,
     ) -> None:
         if active_order is None:
+            price = _pick_price(desired, side, desired.force, shares)
             self._submit_order(
-                desired.market, desired.token, side, shares, desired.price, desired.force
+                desired.market, desired.token, side, shares, price, desired.force
             )
             return
 
@@ -151,7 +161,8 @@ class PaperExecutionEngine:
         now = now_ts_ms()
         age_s = (now - active_order.created_ts_ms) / 1000
         ttl_expired = not desired.force and age_s >= _REPLACE_TTL_S
-        price_moved = abs(active_order.price - desired.price) >= _REPLACE_PRICE_GAP
+        new_price = _pick_price(desired, side, desired.force, shares)
+        price_moved = abs(active_order.price - new_price) >= _REPLACE_PRICE_GAP
         shares_changed = abs(active_order.shares - shares) >= _REPLACE_SHARES_GAP
         if not ttl_expired and not price_moved and not shares_changed:
             return
@@ -169,7 +180,7 @@ class PaperExecutionEngine:
             active_order.shares,
             active_order.price,
             shares,
-            desired.price,
+            new_price,
         )
         self._cancel_order(active_order, reason=reason)
 
