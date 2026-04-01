@@ -12,7 +12,7 @@ class CurrentPositionEvent:
     opening_shares: float
     holding_shares: float
     closing_shares: float
-    holding_cost: float = 0.0
-    holding_avg_price: float | None = None
+    holding_cost: float
+    holding_avg_price: float
     holding_open_ts_ms: int | None = None
     realized_pnl: float = 0.0

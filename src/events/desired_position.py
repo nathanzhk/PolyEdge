@@ -10,5 +10,6 @@ class DesiredPositionEvent:
     market: Market
     token: Token
     shares: float
-    price: float
+    best_bid: float
+    best_ask: float
     force: bool = False
