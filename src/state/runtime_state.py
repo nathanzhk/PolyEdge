@@ -234,8 +234,6 @@ def _log_positions(event: RuntimeStateEvent) -> None:
         event.market.yes_token.id: event.yes_token_quote.best_bid,
         event.market.no_token.id: event.no_token_quote.best_bid,
     }
-    total_realized = 0.0
-    total_unrealized = 0.0
     for position in event.positions:
         bid = bid_by_token_id.get(position.token.id)
         if bid is None:
@@ -245,23 +243,13 @@ def _log_positions(event: RuntimeStateEvent) -> None:
             if position.holding_shares > 0
             else 0.0
         )
-        total_realized += position.realized_pnl
-        total_unrealized += unrealized
-        if position.holding_shares > 0 or position.realized_pnl != 0.0:
-            logger.info(
-                "holding %s %.2f @ %.2f cost=%.2f uPnL=%s rPnL=%s",
-                position.token.key,
-                position.holding_shares,
-                position.holding_avg_price,
-                position.holding_cost,
-                _fmt_signed_usd(unrealized),
-                _fmt_signed_usd(position.realized_pnl),
-            )
-    if total_unrealized != 0.0 or total_realized != 0.0:
         logger.info(
-            "  total uPnL=%s rPnL=%s",
-            _fmt_signed_usd(total_unrealized),
-            _fmt_signed_usd(total_realized),
+            "%s %.6f @ %.2f uPnL=%s rPnL=%s",
+            "▲" if position.token.key == "up" else "▼",
+            position.holding_shares,
+            position.holding_avg_price,
+            _fmt_signed_usd(unrealized),
+            _fmt_signed_usd(position.realized_pnl),
         )
 
 

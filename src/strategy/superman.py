@@ -108,7 +108,8 @@ class SupermanStrategy:
             market=market,
             token=token,
             shares=self.config.entry_shares,
-            price=_bid_for_token(yes_quote, no_quote, token),
+            best_bid=_bid_for_token(yes_quote, no_quote, token),
+            best_ask=_ask_for_token(yes_quote, no_quote, token),
         )
 
     def _opening(
@@ -127,13 +128,15 @@ class SupermanStrategy:
                     market=market,
                     token=token,
                     shares=self.config.entry_shares,
-                    price=_bid_for_token(yes_quote, no_quote, token),
+                    best_bid=_bid_for_token(yes_quote, no_quote, token),
+                    best_ask=_ask_for_token(yes_quote, no_quote, token),
                 )
         return DesiredPositionEvent(
             market=market,
             token=position.token,
             shares=0.0,
-            price=_ask_for_token(yes_quote, no_quote, position.token),
+            best_bid=_bid_for_token(yes_quote, no_quote, position.token),
+            best_ask=_ask_for_token(yes_quote, no_quote, position.token),
         )
 
     def _holding(
@@ -149,7 +152,8 @@ class SupermanStrategy:
                 market=market,
                 token=position.token,
                 shares=0.0,
-                price=_ask_for_token(yes_quote, no_quote, position.token),
+                best_bid=_bid_for_token(yes_quote, no_quote, position.token),
+                best_ask=_ask_for_token(yes_quote, no_quote, position.token),
             )
 
     def _closing(
@@ -165,14 +169,16 @@ class SupermanStrategy:
                 market=market,
                 token=position.token,
                 shares=0.0,
-                price=_ask_for_token(yes_quote, no_quote, position.token),
+                best_bid=_bid_for_token(yes_quote, no_quote, position.token),
+                best_ask=_ask_for_token(yes_quote, no_quote, position.token),
                 force=True,
             )
         return DesiredPositionEvent(
             market=market,
             token=position.token,
             shares=0.0,
-            price=_ask_for_token(yes_quote, no_quote, position.token),
+            best_bid=_bid_for_token(yes_quote, no_quote, position.token),
+            best_ask=_ask_for_token(yes_quote, no_quote, position.token),
         )
 
     def _check_signal(

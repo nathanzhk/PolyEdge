@@ -3,7 +3,7 @@ import logging
 
 from app import Runtime
 from markets.btc import BTC5mMarket
-from strategy.superman import SupermanStrategy
+from strategy.flash import FlashStrategy
 from utils.env import Env
 from utils.logger import configure_logging, get_logger
 
@@ -24,7 +24,7 @@ async def run() -> None:
     runtime = Runtime(
         market=BTC5mMarket,
         symbol="BTCUSDT",
-        strategy=SupermanStrategy(),
+        strategy=FlashStrategy(),
     )
     await runtime.run()
 
