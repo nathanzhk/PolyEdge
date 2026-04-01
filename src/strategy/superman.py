@@ -27,8 +27,8 @@ class _Config:
     taker_exit_sec: float = 100.0  # entry-relative
     min_btc_move: float = 10.0
     max_btc_move: float = 999.0
-    neutral_lo: float = 0.40
-    neutral_hi: float = 0.60
+    neutral_lo: float = 0.39
+    neutral_hi: float = 0.61
     max_ask: float = 0.65
     entry_shares: float = 5.02
 

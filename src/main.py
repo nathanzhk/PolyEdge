@@ -15,9 +15,11 @@ async def run() -> None:
     configure_logging()
 
     bus_logger = get_logger("BUS")
-    bus_logger.setLevel(logging.INFO)
     state_logger = get_logger("STATE")
-    state_logger.setLevel(logging.INFO)
+    maker_logger = get_logger("MAKER")
+    taker_logger = get_logger("TAKER")
+    for info_logger in {bus_logger, state_logger, maker_logger, taker_logger}:
+        info_logger.setLevel(logging.INFO)
 
     runtime = Runtime(
         market=BTC5mMarket,

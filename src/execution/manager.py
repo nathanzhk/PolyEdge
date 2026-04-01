@@ -393,6 +393,15 @@ class OrderManager:
                 else:
                     order.status = ManagedOrderStatus.FULL_MATCHED
 
+        logger.debug(
+            "order %s status=%s matched=%.2f matching=%.2f canceled=%.2f",
+            order.order_id,
+            order.status,
+            order.off_chain_matched_shares,
+            order.off_chain_pending_shares,
+            order.off_chain_invalid_shares,
+        )
+
     async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)

@@ -72,6 +72,10 @@ class ExecutionEngine:
         shares: float,
         active_order: ManagedOrder | None,
     ) -> None:
+
+        if shares < self._replace_shares_gap:
+            return None
+
         if active_order is None:
             if side == Side.BUY:
                 await self._order_manager.buy(
@@ -103,16 +107,13 @@ class ExecutionEngine:
         age_s = (now - active_order.created_ts_ms) / 1000
         ttl_expired = not desired_position.force and age_s >= self._replace_ttl_s
         price_moved = abs(active_order.price - desired_position.price) >= self._replace_price_gap
-        shares_changed = abs(active_order.shares - shares) >= self._replace_shares_gap
-        if not ttl_expired and not price_moved and not shares_changed:
+        if not ttl_expired and not price_moved:
             return
 
         if ttl_expired:
             reason = "ttl expired"
-        elif price_moved:
-            reason = "price changed"
         else:
-            reason = "shares changed"
+            reason = "price changed"
         logger.info(
             "%s: cancel order %s for replace %.6f @ %.2f -> %.6f @ %.2f",
             reason,

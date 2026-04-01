@@ -61,9 +61,11 @@ class Runtime:
             bus=EventBus(),
             strategy_engine=StrategyEngine(strategy),
             execution_engine=ExecutionEngine(maker_client, taker_client),
-            market_quote_stream=MarketQuoteStream(market),
-            crypto_quote_stream=CryptoQuoteStream(symbol),
+            market_quote_stream=MarketQuoteStream(
+                market, on_switch=[maker_client.warm_up, taker_client.warm_up]
+            ),
             market_trade_stream=MarketTradeStream(maker_client.get_credentials()),
+            crypto_quote_stream=CryptoQuoteStream(symbol),
             crypto_ohlcv_stream=CryptoOHLCVStream(symbol),
         )
         self._register_components()

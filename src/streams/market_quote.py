@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass
 
 import orjson
@@ -29,10 +29,13 @@ class _MarketContext:
 
 
 class MarketQuoteStream:
-    def __init__(self, market_type: type[Market]) -> None:
+    def __init__(
+        self, market_type: type[Market], on_switch: Sequence[Callable[[Market], None]] = ()
+    ) -> None:
         market = market_type.curr_market()
         if market is None:
             raise ValueError("cannot load current market")
+        self._on_switch = on_switch
         self._ctx = _MarketContext(
             yes_token=market.yes_token,
             no_token=market.no_token,
@@ -134,6 +137,8 @@ class MarketQuoteStream:
                 no_token=next_market.no_token,
                 market=next_market,
             )
+            for callback in self._on_switch:
+                await asyncio.to_thread(callback, next_market)
             await _update_subscribe(ws, ws_lock, "subscribe", next_market)
             logger.debug("switch market from %s to %s", curr_market.slug, next_market.slug)
 
