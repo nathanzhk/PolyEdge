@@ -28,7 +28,11 @@ class MarketOrderEvent:
 
     @property
     def unmatched_shares(self) -> float:
-        return round(self.shares - self.matched_shares, 6)
+        return (
+            round(self.shares - self.matched_shares, 6)
+            if self.shares > self.matched_shares
+            else 0.0
+        )
 
     @property
     def is_active(self) -> bool:

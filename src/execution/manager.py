@@ -414,6 +414,9 @@ class OrderManager:
                 logger.error("ignore mismatched order event: %s", event)
                 return
 
+            if event.matched_shares > event.shares:
+                order.shares = event.matched_shares
+
             if event.is_inactive or order.is_canceled:
                 order.off_chain_matched_shares = max(
                     order.off_chain_matched_shares, event.matched_shares
