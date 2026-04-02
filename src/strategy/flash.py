@@ -151,6 +151,7 @@ class FlashStrategy:
                 shares=self.config.entry_shares,
                 best_bid=_bid_for_token(yes_quote, no_quote, position.token),
                 best_ask=_ask_for_token(yes_quote, no_quote, position.token),
+                force=True,
             )
         # Momentum gone or reversed — cancel entry
         logger.info("cancel entry %s, momentum=%s", position.token.key, momentum.name)
