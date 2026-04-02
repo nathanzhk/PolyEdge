@@ -387,7 +387,7 @@ class OrderManager:
             order_id=order_id,
             trade_ids=[],
             status=market_order.status,
-            shares=market_order.ordered_shares,
+            shares=market_order.shares,
             side=market_order.side,
             type=market_order.type,
             price=market_order.price,

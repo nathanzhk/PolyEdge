@@ -5,16 +5,17 @@ from enums import MarketOrderStatus, MarketOrderType, Side
 
 @dataclass(slots=True, frozen=True)
 class MarketOrder:
-    id: str
-    side: Side
-    type: MarketOrderType
-    status: MarketOrderStatus
-    ordered_shares: float
-    matched_shares: float
     market_id: str
     token_id: str
+    order_id: str
+    trade_ids: list[str]
+    status: MarketOrderStatus
+    shares: float
+    side: Side
+    type: MarketOrderType
     price: float
+    matched_shares: float
 
     @property
-    def pending_shares(self) -> float:
-        return round(self.ordered_shares - self.matched_shares, 6)
+    def unmatched_shares(self) -> float:
+        return round(self.shares - self.matched_shares, 6)

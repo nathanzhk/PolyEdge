@@ -225,15 +225,16 @@ class TakerTradeClient(TradeClient):
 
 def _parse_market_order(data: Mapping[str, Any]) -> MarketOrder:
     return MarketOrder(
-        id=data["id"],
-        side=Side(data["side"]),
-        type=MarketOrderType(data["order_type"]),
-        status=MarketOrderStatus(data["status"]),
-        ordered_shares=round(float(data["original_size"]), 6),
-        matched_shares=round(float(data["size_matched"]), 6),
         market_id=data["market"],
         token_id=data["asset_id"],
+        order_id=data["id"],
+        trade_ids=data.get("associate_trades", []),
+        status=MarketOrderStatus(data["status"]),
+        shares=round(float(data["original_size"]), 6),
+        side=Side(data["side"]),
+        type=MarketOrderType(data["order_type"]),
         price=round(float(data["price"]), 3),
+        matched_shares=round(float(data["size_matched"]), 6),
     )
 
 
