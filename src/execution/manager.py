@@ -385,7 +385,7 @@ class OrderManager:
             market_id=market_id,
             token_id=token_id,
             order_id=order_id,
-            trade_ids=[],
+            trade_ids=market_order.trade_ids,
             status=market_order.status,
             shares=market_order.shares,
             side=market_order.side,
@@ -448,8 +448,8 @@ class OrderManager:
             "order %s status=%s matching=%.6f matched=%.6f canceled=%.6f",
             order.order_id,
             order.status,
-            order.off_chain_matched_shares,
             order.off_chain_pending_shares,
+            order.off_chain_matched_shares,
             order.off_chain_invalid_shares,
         )
 
@@ -509,9 +509,27 @@ class OrderManager:
             if trade.status == ManagedTradeStatus.SUCCESS:
                 position = self._positions_by_token_id.get(event.token_id)
                 realized_pnl = position.realized_pnl if position is not None else _ZERO
-                self._apply_confirmed_trade(
-                    event.token_id, event.side, event.shares, event.price, event.exch_ts_ms
+
+                net_shares = (
+                    self._taker_client.calc_net_buy_shares(order.market, event.shares, event.price)
+                    if event.role == Role.TAKER and event.side == Side.BUY
+                    else None
                 )
+                net_amount = (
+                    self._taker_client.calc_net_sell_value(order.market, event.shares, event.price)
+                    if event.role == Role.TAKER and event.side == Side.BUY
+                    else None
+                )
+                self._apply_confirmed_trade(
+                    event.token_id,
+                    event.side,
+                    event.shares,
+                    event.price,
+                    event.exch_ts_ms,
+                    net_shares=net_shares,
+                    net_amount=net_amount,
+                )
+
                 position = self._positions_by_token_id[event.token_id]
                 pnl = position.realized_pnl - realized_pnl if event.side == Side.SELL else None
                 self._track_background_task(
@@ -527,11 +545,20 @@ class OrderManager:
                     ),
                     name=f"send-trade-{event.trade_id}",
                 )
+
                 logger.debug("trade %s settled %.6f", trade.order_id, trade.shares)
                 return self._build_current_position_event(order.market, order.token)
 
     def _apply_confirmed_trade(
-        self, token_id: str, side: Side, shares: float, price: float, ts_ms: int
+        self,
+        token_id: str,
+        side: Side,
+        shares: float,
+        price: float,
+        ts_ms: int,
+        *,
+        net_shares: float | None = None,
+        net_amount: float | None = None,
     ) -> None:
         position = self._positions_by_token_id.get(token_id)
         if position is None:
@@ -539,20 +566,26 @@ class OrderManager:
             self._positions_by_token_id[token_id] = position
 
         if side == Side.BUY:
+            received_shares = net_shares if net_shares is not None else shares
+
             position.cost = round(position.cost + shares * price, 6)
-            position.shares = round(position.shares + shares, 6)
+            position.shares = round(position.shares + received_shares, 6)
             position.open_ts_ms = (
                 ts_ms if position.open_ts_ms is None else min(position.open_ts_ms, ts_ms)
             )
         else:
             holding_before = position.shares
-            reduced_shares = min(shares, position.shares)
+            reduced_shares = min(shares, holding_before)
+
             avg_price = position.avg_price or _ZERO
-            position.cost = round(position.cost - reduced_shares * avg_price, 6)
+            cost = reduced_shares * avg_price
+
+            received_value = net_amount if net_amount is not None else reduced_shares * price
+
+            position.cost = round(position.cost - cost, 6)
             position.shares = round(position.shares - reduced_shares, 6)
-            position.realized_pnl = round(
-                position.realized_pnl + reduced_shares * (price - avg_price), 6
-            )
+            position.realized_pnl = round(position.realized_pnl + received_value - cost, 6)
+
             if shares > reduced_shares:
                 logger.warning(
                     "sell settled shares exceed holding: token=%s sell=%.6f holding=%.6f",

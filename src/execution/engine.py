@@ -139,6 +139,6 @@ class ExecutionEngine:
 def _pick_price(desired: DesiredPositionEvent, side: Side, force: bool, shares: float) -> float:
     as_maker = not force and shares >= 5.0
     if side == Side.BUY:
-        return desired.best_bid if as_maker else desired.best_ask
+        return desired.best_bid if as_maker else desired.best_ask + 0.01
     else:
-        return desired.best_ask if as_maker else desired.best_bid
+        return desired.best_ask if as_maker else desired.best_bid - 0.01
