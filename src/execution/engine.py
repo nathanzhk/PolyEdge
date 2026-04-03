@@ -13,6 +13,7 @@ logger = get_logger("TRADE")
 
 ZERO = 0.0
 SHARES_EPSILON = 0.000001
+MAKER_SHARES_THRESHOLD = 5.00
 
 
 class ExecutionEngine:
@@ -137,8 +138,8 @@ class ExecutionEngine:
 
 
 def _pick_price(desired: DesiredPositionEvent, side: Side, force: bool, shares: float) -> float:
-    as_maker = not force and shares >= 5.0
+    as_maker = not force and shares >= MAKER_SHARES_THRESHOLD
     if side == Side.BUY:
-        return desired.best_bid if as_maker else desired.best_ask + 0.01
+        return desired.best_bid if as_maker else desired.best_ask
     else:
-        return desired.best_ask if as_maker else desired.best_bid - 0.01
+        return desired.best_ask if as_maker else desired.best_bid
