@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "PolyEdge"
 requires-python = ">=3.13"
 dependencies = [
-  "py-clob-client>=0.32.0",
+  "py-clob-client-v2>=1.0.0",
   "python-dotenv>=1.2.0",
   "websockets>=15.0.1",
   "requests>=2.32.0",

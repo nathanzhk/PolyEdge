@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import orjson
-from py_clob_client.clob_types import ApiCreds
+from py_clob_client_v2.clob_types import ApiCreds
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 
