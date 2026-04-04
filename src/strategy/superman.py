@@ -48,7 +48,12 @@ class SupermanStrategy:
 
         elapsed_s = _elapsed_s(market, now_ts_ms())
 
-        active_position = self._get_active_position(list(state.positions))
+        active_position = None
+        if state.yes_token_position is not None and state.yes_token_position.is_active:
+            active_position = state.yes_token_position
+        if state.no_token_position is not None and state.no_token_position.is_active:
+            active_position = state.no_token_position
+
         position_status = self._get_position_status(active_position, elapsed_s)
 
         if position_status == _PositionStatus.OBSERVE:
