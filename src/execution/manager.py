@@ -26,7 +26,6 @@ class _Position:
     token_id: str
     cost: float = _ZERO
     shares: float = _ZERO
-    open_ts_ms: int | None = None
     realized_pnl: float = _ZERO
 
     @property
@@ -570,9 +569,6 @@ class OrderManager:
 
             position.cost = round(position.cost + shares * price, 6)
             position.shares = round(position.shares + received_shares, 6)
-            position.open_ts_ms = (
-                ts_ms if position.open_ts_ms is None else min(position.open_ts_ms, ts_ms)
-            )
         else:
             holding_before = position.shares
             reduced_shares = min(shares, holding_before)
@@ -597,7 +593,6 @@ class OrderManager:
         if position.shares <= _POSITION_SHARES_DUST:
             position.cost = _ZERO
             position.shares = _ZERO
-            position.open_ts_ms = None
 
     def _build_current_position_event(self, market: Market, token: Token) -> CurrentPositionEvent:
 
@@ -627,7 +622,6 @@ class OrderManager:
             closing_shares=round(closing_shares, 6),
             holding_avg_price=position.avg_price if position is not None else _ZERO,
             holding_cost=position.cost if position is not None else _ZERO,
-            holding_open_ts_ms=position.open_ts_ms if position is not None else None,
             realized_pnl=position.realized_pnl if position is not None else _ZERO,
         )
 

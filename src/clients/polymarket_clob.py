@@ -2,18 +2,17 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from py_clob_client_v2.client import ClobClient
-from py_clob_client_v2.clob_types import (
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import (
     ApiCreds,
     AssetType,
     BalanceAllowanceParams,
     OpenOrderParams,
     OrderArgs,
-    OrderPayload,
     OrderType,
 )
-from py_clob_client_v2.exceptions import PolyApiException
-from py_clob_client_v2.order_builder.constants import BUY, SELL
+from py_clob_client.exceptions import PolyApiException
+from py_clob_client.order_builder.constants import BUY, SELL
 
 from enums import MarketOrderStatus, MarketOrderType, Role, Side
 from markets.base import Market, Token
@@ -40,7 +39,7 @@ class TradeClient:
         self.client.get_ok()
 
     def get_credentials(self) -> ApiCreds:
-        return self.client.create_or_derive_api_key()
+        return self.client.create_or_derive_api_creds()
 
     def buy(self, token: Token, shares: float, price: float) -> str | None:
         return self._submit_order(token=token, shares=shares, price=price, side=BUY)
@@ -55,7 +54,7 @@ class TradeClient:
                 self.client.get_neg_risk(token.id)
                 self.client.get_tick_size(token.id)
                 self.client.get_fee_rate_bps(token.id)
-            self.client.get_clob_market_info(market.id)
+            # self.client.get_market(market.id)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
             self.logger.error("warm up failed: %s", _error_message(e))
@@ -115,7 +114,7 @@ class TradeClient:
     def get_orders_by_token(self, token: Token) -> list[MarketOrder]:
         try:
             params = OpenOrderParams(asset_id=token.id)
-            resp = self.client.get_open_orders(params)
+            resp = self.client.get_orders(params)
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
@@ -139,8 +138,8 @@ class TradeClient:
 
     def cancel_order_by_id(self, order_id: str) -> tuple[bool, str]:
         try:
-            params = OrderPayload(orderID=order_id)
-            resp = self.client.cancel_order(params)
+            # params = OrderPayload(orderID=order_id)
+            resp = self.client.cancel(order_id)
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
@@ -183,7 +182,7 @@ class TradeClient:
             submit_start_ns = time.perf_counter_ns()
             try:
                 resp = self.client.post_order(
-                    order, post_only=self.post_only, order_type=self.order_type
+                    order, post_only=self.post_only, orderType=self.order_type
                 )
                 self.logger.debug("%r", resp)
             finally:

@@ -37,7 +37,8 @@ class RuntimeState:
         self._beat_price: float | None = None
         self._beat_offset_ms: int | None = None
 
-        self._positions_by_token_id: dict[str, CurrentPositionEvent] = {}
+        self._yes_position: CurrentPositionEvent | None = None
+        self._no_position: CurrentPositionEvent | None = None
 
     async def update_market_quote(
         self,
@@ -102,7 +103,10 @@ class RuntimeState:
         self, position: CurrentPositionEvent
     ) -> RuntimeStateEvent | None:
         async with self._lock:
-            self._positions_by_token_id[position.token.id] = position
+            if position.token.id == self._yes_token.id:
+                self._yes_position = position
+            elif position.token.id == self._no_token.id:
+                self._no_position = position
             return self._event_if_changed("current_position")
 
     def _switch_market(self, market: Market) -> None:
@@ -113,7 +117,8 @@ class RuntimeState:
         self._market = market
         self._beat_price = None
         self._beat_offset_ms = None
-        self._positions_by_token_id.clear()
+        self._yes_position = None
+        self._no_position = None
         logger.info("%s", market.title)
 
     def _record_beat_price(self, quote: CryptoQuoteEvent) -> None:
@@ -157,7 +162,8 @@ class RuntimeState:
             crypto_quote=self._crypto_quote,
             crypto_ohlcv=self._crypto_ohlcv,
             beat_price=self._beat_price,
-            positions=tuple(self._positions_by_token_id.values()),
+            yes_token_position=self._yes_position,
+            no_token_position=self._no_position,
         )
 
 
@@ -181,19 +187,24 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
             event.crypto_ohlcv.close_ts_ms,
         ),
         event.beat_price,
-        tuple(
-            (
-                position.token.id,
-                position.opening_shares,
-                position.holding_shares,
-                position.closing_shares,
-                position.holding_cost,
-                position.holding_avg_price,
-                position.holding_open_ts_ms,
-                position.realized_pnl,
-            )
-            for position in event.positions
-        ),
+        (
+            event.yes_token_position.opening_shares,
+            event.yes_token_position.holding_shares,
+            event.yes_token_position.closing_shares,
+            event.yes_token_position.holding_cost,
+            event.yes_token_position.holding_avg_price,
+        )
+        if event.yes_token_position is not None
+        else (),
+        (
+            event.no_token_position.opening_shares,
+            event.no_token_position.holding_shares,
+            event.no_token_position.closing_shares,
+            event.no_token_position.holding_cost,
+            event.no_token_position.holding_avg_price,
+        )
+        if event.no_token_position is not None
+        else (),
     )
 
 
@@ -205,18 +216,12 @@ def _log_event(event: RuntimeStateEvent) -> None:
         elapsed_ms_since(event.crypto_quote.recv_mono_ns),
         elapsed_ms_since(event.crypto_ohlcv.recv_mono_ns),
     )
+    time_start = fmt_duration_s(now_ts_s() - event.market.start_ts_s)
+    time_close = fmt_duration_s(event.market.end_ts_s - now_ts_s())
     logger.info(
-        "[%s-%s] %.2fms | bid %.2f ▲ ask %.2f | bid %.2f ▼ ask %.2f | $%.2f %s",
-        fmt_duration_s(now_ts_s() - event.market.start_ts_s),
-        fmt_duration_s(event.market.end_ts_s - now_ts_s()),
-        elapsed_ms_since(
-            max(
-                event.yes_token_quote.recv_mono_ns,
-                event.no_token_quote.recv_mono_ns,
-                event.crypto_quote.recv_mono_ns,
-                event.crypto_ohlcv.recv_mono_ns,
-            )
-        ),
+        "[%s-%s] ▲ bid %.2f ask %.2f | ▼ bid %.2f ask %.2f | $%.2f %s",
+        time_start,
+        time_close,
         event.yes_token_quote.best_bid,
         event.yes_token_quote.best_ask,
         event.no_token_quote.best_bid,
@@ -224,33 +229,34 @@ def _log_event(event: RuntimeStateEvent) -> None:
         event.crypto_quote.mid,
         _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
     )
-    _log_positions(event)
-
-
-def _log_positions(event: RuntimeStateEvent) -> None:
-    if not event.positions:
-        return
-    bid_by_token_id = {
-        event.market.yes_token.id: event.yes_token_quote.best_bid,
-        event.market.no_token.id: event.no_token_quote.best_bid,
-    }
-    for position in event.positions:
-        bid = bid_by_token_id.get(position.token.id)
-        if bid is None:
-            continue
-        unrealized = (
-            position.holding_shares * bid - position.holding_cost
-            if position.holding_shares > 0
-            else 0.0
-        )
-        logger.info(
-            "%s %.6f @ %.2f uPnL=%s rPnL=%s",
-            "▲" if position.token.key == "up" else "▼",
-            position.holding_shares,
-            position.holding_avg_price,
-            _fmt_signed_usd(unrealized),
-            _fmt_signed_usd(position.realized_pnl),
-        )
+    logger.info(
+        "[%s-%s] ▲ | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
+        time_start,
+        time_close,
+        event.yes_token_position.opening_shares,
+        event.yes_token_position.holding_shares,
+        event.yes_token_position.holding_avg_price,
+        _fmt_signed_usd(
+            event.yes_token_position.holding_shares * event.yes_token_quote.best_bid
+            - event.yes_token_position.holding_cost
+        ),
+        event.yes_token_position.closing_shares,
+        _fmt_signed_usd(event.yes_token_position.realized_pnl),
+    ) if event.yes_token_position is not None else ...
+    logger.info(
+        "[%s-%s] ▼ | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
+        time_start,
+        time_close,
+        event.no_token_position.opening_shares,
+        event.no_token_position.holding_shares,
+        event.no_token_position.holding_avg_price,
+        _fmt_signed_usd(
+            event.no_token_position.holding_shares * event.no_token_quote.best_bid
+            - event.no_token_position.holding_cost
+        ),
+        event.no_token_position.closing_shares,
+        _fmt_signed_usd(event.no_token_position.realized_pnl),
+    ) if event.no_token_position is not None else ...
 
 
 def _fmt_signed_usd(value: float) -> str:

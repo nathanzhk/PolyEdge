@@ -253,8 +253,7 @@ def _elapsed_s(market: Market, ts_ms: int) -> int:
 
 
 def _holding_elapsed_s(position: CurrentPositionEvent, ts_ms: int) -> float:
-    if position.holding_open_ts_ms is None:
-        return 0.0
+    return 0.0
     return (ts_ms - position.holding_open_ts_ms) / 1000
 
 

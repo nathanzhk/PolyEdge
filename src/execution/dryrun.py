@@ -149,9 +149,7 @@ class PaperExecutionEngine:
     ) -> None:
         if active_order is None:
             price = _pick_price(desired, side, desired.force, shares)
-            self._submit_order(
-                desired.market, desired.token, side, shares, price, desired.force
-            )
+            self._submit_order(desired.market, desired.token, side, shares, price, desired.force)
             return
 
         if active_order.side != side:
@@ -323,7 +321,6 @@ class PaperExecutionEngine:
             closing_shares=round(closing_shares, 6),
             holding_avg_price=position.avg_price if position else None,
             holding_cost=position.cost if position else _ZERO,
-            holding_open_ts_ms=position.open_ts_ms if position else None,
             realized_pnl=position.realized_pnl if position else _ZERO,
         )
 
