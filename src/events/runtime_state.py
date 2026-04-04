@@ -20,6 +20,7 @@ class RuntimeStateEvent:
     crypto_quote: CryptoQuoteEvent
     crypto_ohlcv: CryptoOHLCVEvent
     beat_price: float
-    positions: tuple[CurrentPositionEvent, ...]
+    yes_token_position: CurrentPositionEvent | None
+    no_token_position: CurrentPositionEvent | None
     event_ts_ms: int = field(default_factory=now_ts_ms)
     event_mono_ns: int = field(default_factory=perf_counter_ns)
