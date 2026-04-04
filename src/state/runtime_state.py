@@ -216,12 +216,10 @@ def _log_event(event: RuntimeStateEvent) -> None:
         elapsed_ms_since(event.crypto_quote.recv_mono_ns),
         elapsed_ms_since(event.crypto_ohlcv.recv_mono_ns),
     )
-    time_start = fmt_duration_s(now_ts_s() - event.market.start_ts_s)
-    time_close = fmt_duration_s(event.market.end_ts_s - now_ts_s())
     logger.info(
         "[%s-%s] ▲ bid %.2f ask %.2f | ▼ bid %.2f ask %.2f | $%.2f %s",
-        time_start,
-        time_close,
+        fmt_duration_s(now_ts_s() - event.market.start_ts_s),
+        fmt_duration_s(event.market.end_ts_s - now_ts_s()),
         event.yes_token_quote.best_bid,
         event.yes_token_quote.best_ask,
         event.no_token_quote.best_bid,
@@ -230,9 +228,7 @@ def _log_event(event: RuntimeStateEvent) -> None:
         _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
     )
     logger.info(
-        "[%s-%s] ▲ | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
-        time_start,
-        time_close,
+        "UP | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
         event.yes_token_position.opening_shares,
         event.yes_token_position.holding_shares,
         event.yes_token_position.holding_avg_price,
@@ -244,9 +240,7 @@ def _log_event(event: RuntimeStateEvent) -> None:
         _fmt_signed_usd(event.yes_token_position.realized_pnl),
     ) if event.yes_token_position is not None else ...
     logger.info(
-        "[%s-%s] ▼ | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
-        time_start,
-        time_close,
+        "DN | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
         event.no_token_position.opening_shares,
         event.no_token_position.holding_shares,
         event.no_token_position.holding_avg_price,
@@ -260,4 +254,4 @@ def _log_event(event: RuntimeStateEvent) -> None:
 
 
 def _fmt_signed_usd(value: float) -> str:
-    return f"{'▲ +' if value >= 0 else '▼ -'}${abs(value):.2f}"
+    return f"{'△ +' if value >= 0 else '▽ -'}${abs(value):.2f}"

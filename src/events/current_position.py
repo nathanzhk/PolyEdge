@@ -15,3 +15,7 @@ class CurrentPositionEvent:
     holding_cost: float
     holding_avg_price: float
     realized_pnl: float = 0.0
+
+    @property
+    def is_active(self) -> bool:
+        return self.opening_shares > 0 or self.holding_shares > 0 or self.closing_shares > 0

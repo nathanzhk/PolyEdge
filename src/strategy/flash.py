@@ -54,7 +54,11 @@ class FlashStrategy:
         if elapsed_s not in self._btc_by_s:
             self._btc_by_s[elapsed_s] = state.crypto_quote.mid
 
-        position = _get_active_position(state.positions)
+        position = None
+        if state.yes_token_position is not None and state.yes_token_position.is_active:
+            position = state.yes_token_position
+        if state.no_token_position is not None and state.no_token_position.is_active:
+            position = state.no_token_position
 
         if position is not None and elapsed_s >= self.config.force_exit_s:
             return DesiredPositionEvent(
@@ -249,19 +253,6 @@ class FlashStrategy:
 
 def _elapsed_s(market: Market, ts_ms: int) -> int:
     return (ts_ms - market.start_ts_ms) // 1000
-
-
-def _get_active_position(
-    positions: tuple[CurrentPositionEvent, ...],
-) -> CurrentPositionEvent | None:
-    for position in positions:
-        if (
-            position.opening_shares > 0
-            or position.holding_shares > 0
-            or position.closing_shares > 0
-        ):
-            return position
-    return None
 
 
 def _bid_for_token(
