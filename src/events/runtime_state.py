@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from time import perf_counter_ns
+from typing import Literal
 
 from events.crypto_ohlcv import CryptoOHLCVEvent
 from events.crypto_quote import CryptoQuoteEvent
@@ -9,6 +10,8 @@ from events.current_position import CurrentPositionEvent
 from events.market_quote import MarketQuoteEvent
 from markets.base import Market
 from utils.time import now_ts_ms
+
+Side = Literal["UP", "DOWN"] | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -22,5 +25,7 @@ class RuntimeStateEvent:
     beat_price: float
     yes_token_position: CurrentPositionEvent | None
     no_token_position: CurrentPositionEvent | None
+    prev_side: Side = None
+    curr_side: Side = None
     event_ts_ms: int = field(default_factory=now_ts_ms)
     event_mono_ns: int = field(default_factory=perf_counter_ns)

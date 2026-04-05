@@ -19,13 +19,13 @@ class _Momentum(IntEnum):
 
 @dataclass(slots=True, frozen=True)
 class _Config:
-    lookback_s: int = 3
-    hold_lookback_s: int = 5  # longer lookback for holding decisions
-    threshold: float = 3.0  # $/s velocity threshold
+    lookback_s: int = 1
+    hold_lookback_s: int = 10  # longer lookback for holding decisions
+    threshold: float = 5.0  # $/s velocity threshold
     hold_threshold: float = 1.5  # lower threshold to maintain hold
-    entry_shares: float = 5.02
-    min_entry_bid: float = 0.35  # don't buy below this price
-    max_entry_ask: float = 0.65  # don't buy above this price
+    entry_shares: float = 6
+    min_entry_bid: float = 0.28  # don't buy below this price
+    max_entry_ask: float = 0.72  # don't buy above this price
     min_entry_s: int = 5  # earliest entry (seconds into window)
     max_entry_s: int = 240  # latest entry — leave room for exit
     force_exit_s: int = 270  # force close before window ends
@@ -74,6 +74,7 @@ class FlashStrategy:
             return None
 
         momentum = self._get_momentum(elapsed_s)
+        logger.debug("evaluate momentum %s", momentum)
 
         if position is None:
             if elapsed_s > self.config.max_entry_s:
@@ -88,6 +89,7 @@ class FlashStrategy:
 
         cfg = self.config
         hold_momentum = self._get_momentum(elapsed_s, cfg.hold_lookback_s, cfg.hold_threshold)
+        logger.debug("holding momentum %s", hold_momentum)
         return self._holding(market, yes_quote, no_quote, position, momentum, hold_momentum)
 
     # ------------------------------------------------------------------
@@ -118,7 +120,8 @@ class FlashStrategy:
                 token=market.yes_token,
                 shares=self.config.entry_shares,
                 best_bid=yes_quote.best_bid,
-                best_ask=yes_quote.best_ask,
+                best_ask=yes_quote.best_ask + 0.1,
+                force=True,
             )
         if momentum == _Momentum.DOWN:
             if no_quote.best_ask > self.config.max_entry_ask:
@@ -137,7 +140,8 @@ class FlashStrategy:
                 token=market.no_token,
                 shares=self.config.entry_shares,
                 best_bid=no_quote.best_bid,
-                best_ask=no_quote.best_ask,
+                best_ask=no_quote.best_ask + 0.1,
+                force=True,
             )
         return None
 
@@ -157,7 +161,8 @@ class FlashStrategy:
                 token=position.token,
                 shares=self.config.entry_shares,
                 best_bid=_bid_for_token(yes_quote, no_quote, position.token),
-                best_ask=_ask_for_token(yes_quote, no_quote, position.token),
+                best_ask=_ask_for_token(yes_quote, no_quote, position.token) + 0.5,
+                force=True,
             )
         # Momentum gone or reversed — cancel entry
         logger.info("cancel entry %s, momentum=%s", position.token.key, momentum.name)
@@ -239,6 +244,14 @@ class FlashStrategy:
         if prev_price is None or curr_price is None:
             return _Momentum.FLAT
         velocity = (curr_price - prev_price) / lookback_s
+        logger.debug(
+            "look back %ds: prev=%.2f curr=%.2f v=%.2f t=%.2f",
+            lookback_s,
+            prev_price,
+            curr_price,
+            velocity,
+            threshold,
+        )
         if velocity > threshold:
             return _Momentum.UP
         if velocity < -threshold:

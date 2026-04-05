@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+import dataclasses
+from typing import Any, Literal
 
 from events import (
     CryptoOHLCVEvent,
@@ -18,6 +19,35 @@ logger = get_logger("STATE")
 
 _MAX_BEAT_OFFSET_MS = 200
 
+Side = Literal["UP", "DOWN"] | None
+
+
+class Indicators:
+    __slots__ = ("prev_side", "curr_side")
+
+    def __init__(self) -> None:
+        self.prev_side: Side = None
+        self.curr_side: Side = None
+
+    def update(
+        self,
+        yes_mid: float,
+        no_mid: float,
+        btc_diff: float,
+    ) -> None:
+        self.prev_side = self.curr_side
+
+        if yes_mid > no_mid and btc_diff > 0:
+            self.curr_side = "UP"
+        elif no_mid > yes_mid and btc_diff < 0:
+            self.curr_side = "DOWN"
+        else:
+            self.curr_side = None
+
+    def reset(self) -> None:
+        self.prev_side = None
+        self.curr_side = None
+
 
 class RuntimeState:
     def __init__(self) -> None:
@@ -27,6 +57,8 @@ class RuntimeState:
         self._yes_token: Token
         self._no_token: Token
         self._market: Market | None = None
+
+        self.indicators = Indicators()
 
         self._yes_quote: MarketQuoteEvent | None = None
         self._no_quote: MarketQuoteEvent | None = None
@@ -119,6 +151,7 @@ class RuntimeState:
         self._beat_offset_ms = None
         self._yes_position = None
         self._no_position = None
+        self.indicators.reset()
         logger.info("%s", market.title)
 
     def _record_beat_price(self, quote: CryptoQuoteEvent) -> None:
@@ -141,6 +174,16 @@ class RuntimeState:
         if signature == self._last_signature:
             return None
         self._last_signature = signature
+        self.indicators.update(
+            yes_mid=event.yes_token_quote.mid,
+            no_mid=event.no_token_quote.mid,
+            btc_diff=event.crypto_quote.mid - event.beat_price,
+        )
+        event = dataclasses.replace(
+            event,
+            prev_side=self.indicators.prev_side,
+            curr_side=self.indicators.curr_side,
+        )
         _log_event(event)
         return event
 
