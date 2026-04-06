@@ -13,6 +13,7 @@ from enums import MarketOrderStatus, MarketOrderType, MarketTradeStatus, Role, S
 from events import MarketOrderEvent, MarketTradeEvent
 from utils.env import Env
 from utils.logger import get_logger
+from utils.time import now_ts_ms
 
 _RECONNECT_DELAY_S = 2
 _PING_INTERVAL_S = 10
@@ -55,11 +56,18 @@ class MarketTradeStream:
                                 continue
                             event_type = message.get("event_type")
                             if event_type == "order":
-                                event = _build_order_event(message)
+                                event = build_order_event(
+                                    message,
+                                    source="push",
+                                )
                                 if event is not None:
                                     yield event
                             elif event_type == "trade":
-                                event = _build_trade_event(message, self._proxy_wallet)
+                                event = build_trade_event(
+                                    message,
+                                    self._proxy_wallet,
+                                    source="push",
+                                )
                                 if event is not None:
                                     yield event
                     finally:
@@ -81,11 +89,14 @@ class MarketTradeStream:
             pass
 
 
-def _build_order_event(message: dict) -> MarketOrderEvent | None:
+def build_order_event(message: dict, *, source: str) -> MarketOrderEvent | None:
+    logger.debug("%s order event: %s", source, message)
     try:
+        ts_ms = message["timestamp"]
         trade_ids = message["associate_trades"]
         return MarketOrderEvent(
-            exch_ts_ms=int(message["timestamp"]),
+            event_source=source,
+            exch_ts_ms=int(ts_ms) if ts_ms else now_ts_ms(),
             market_id=message["market"],
             token_id=message["asset_id"],
             order_id=message["id"],
@@ -101,8 +112,10 @@ def _build_order_event(message: dict) -> MarketOrderEvent | None:
         return None
 
 
-def _build_trade_event(message: dict, proxy_wallet: str) -> MarketTradeEvent | None:
+def build_trade_event(message: dict, proxy_wallet: str, *, source: str) -> MarketTradeEvent | None:
+    logger.debug("%s trade event: %s", source, message)
     try:
+        ts_ms = message["timestamp"]
         if str(message.get("maker_address")).lower() == proxy_wallet.lower():
             token_id = message["asset_id"]
             order_id = message["taker_order_id"]
@@ -119,7 +132,8 @@ def _build_trade_event(message: dict, proxy_wallet: str) -> MarketTradeEvent | N
             side = Side(str(sub_order["side"]).upper())
             price = float(sub_order["price"])
         return MarketTradeEvent(
-            exch_ts_ms=int(message["timestamp"]),
+            event_source=source,
+            exch_ts_ms=int(ts_ms) if ts_ms else now_ts_ms(),
             market_id=message["market"],
             token_id=token_id,
             order_id=order_id,

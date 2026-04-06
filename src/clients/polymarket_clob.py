@@ -1,6 +1,4 @@
 import time
-from collections.abc import Mapping
-from typing import Any
 
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import (
@@ -10,13 +8,15 @@ from py_clob_client.clob_types import (
     OpenOrderParams,
     OrderArgs,
     OrderType,
+    TradeParams,
 )
 from py_clob_client.exceptions import PolyApiException
 from py_clob_client.order_builder.constants import BUY, SELL
 
-from enums import MarketOrderStatus, MarketOrderType, Role, Side
+from enums import Role
+from events import MarketOrderEvent, MarketTradeEvent
 from markets.base import Market, Token
-from markets.order import MarketOrder
+from streams import build_order_event, build_trade_event
 from utils.env import Env
 from utils.logger import get_logger
 
@@ -92,7 +92,7 @@ class TradeClient:
         self.logger.debug("token shares: %.6f", shares)
         return shares
 
-    def get_order_by_id(self, order_id: str) -> MarketOrder | None:
+    def get_order_by_id(self, order_id: str) -> MarketOrderEvent | None:
         try:
             resp = self.client.get_order(order_id)
             self.logger.debug("%r", resp)
@@ -101,17 +101,17 @@ class TradeClient:
             self.logger.error("get order failed: %s", _error_message(e))
             return None
 
+        if resp is None:
+            self.logger.warning("order not found: %s", order_id)
+            return None
+
         if not isinstance(resp, dict):
             self.logger.error("invalid response: %r", resp)
             return None
 
-        try:
-            return _parse_market_order(resp)
-        except (KeyError, TypeError, ValueError) as e:
-            self.logger.error("invalid response: %s", e)
-            return None
+        return build_order_event(resp, source="pull")
 
-    def get_orders_by_token(self, token: Token) -> list[MarketOrder]:
+    def get_orders_by_token(self, token: Token) -> list[MarketOrderEvent]:
         try:
             params = OpenOrderParams(asset_id=token.id)
             resp = self.client.get_orders(params)
@@ -125,16 +125,62 @@ class TradeClient:
             self.logger.error("invalid response: %r", resp)
             return []
 
-        orders: list[MarketOrder] = []
+        orders: list[MarketOrderEvent] = []
         for item in resp:
             if not isinstance(item, dict):
                 self.logger.error("invalid response: %r", item)
                 continue
-            try:
-                orders.append(_parse_market_order(item))
-            except (KeyError, TypeError, ValueError) as e:
-                self.logger.error("invalid response: %s", e)
+            order = build_order_event(item, source="pull")
+            orders.append(order) if order is not None else ...
         return orders
+
+    def get_trade_by_id(self, trade_id: str) -> MarketTradeEvent | None:
+        try:
+            params = TradeParams(id=trade_id)
+            resp = self.client.get_trades(params)
+            self.logger.debug("%r", resp)
+        except PolyApiException as e:
+            self.logger.debug("%r", e.error_msg)
+            self.logger.error("get trade failed: %s", _error_message(e))
+            return None
+
+        if not isinstance(resp, list) or len(resp) > 1:
+            self.logger.error("invalid response: %r", resp)
+            return None
+
+        if len(resp) == 0:
+            self.logger.warning("trade not found: %s", trade_id)
+            return None
+
+        resp = resp[0]
+        if not isinstance(resp, dict):
+            self.logger.error("invalid response: %r", resp)
+            return None
+
+        return build_trade_event(resp, Env.POLYMARKET_PROXY_WALLET, source="pull")
+
+    def get_trades_by_token(self, token: Token) -> list[MarketTradeEvent]:
+        try:
+            params = TradeParams(asset_id=token.id)
+            resp = self.client.get_trades(params)
+            self.logger.debug("%r", resp)
+        except PolyApiException as e:
+            self.logger.debug("%r", e.error_msg)
+            self.logger.error("get trades failed: %s", _error_message(e))
+            return []
+
+        if not isinstance(resp, list):
+            self.logger.error("invalid response: %r", resp)
+            return []
+
+        trades: list[MarketTradeEvent] = []
+        for item in resp:
+            if not isinstance(item, dict):
+                self.logger.error("invalid response: %r", item)
+                continue
+            trade = build_trade_event(item, Env.POLYMARKET_PROXY_WALLET, source="pull")
+            trades.append(trade) if trade is not None else ...
+        return trades
 
     def cancel_order_by_id(self, order_id: str) -> tuple[bool, str]:
         try:
@@ -221,21 +267,6 @@ class TakerTradeClient(TradeClient):
     role: Role = Role.TAKER
     post_only: bool = False
     order_type: OrderType = OrderType.FOK  # type: ignore
-
-
-def _parse_market_order(data: Mapping[str, Any]) -> MarketOrder:
-    return MarketOrder(
-        market_id=data["market"],
-        token_id=data["asset_id"],
-        order_id=data["id"],
-        trade_ids=data.get("associate_trades", []),
-        status=MarketOrderStatus(data["status"]),
-        shares=round(float(data["original_size"]), 6),
-        side=Side(data["side"]),
-        type=MarketOrderType(data["order_type"]),
-        price=round(float(data["price"]), 3),
-        matched_shares=round(float(data["size_matched"]), 6),
-    )
 
 
 def _error_message(error: PolyApiException) -> str:

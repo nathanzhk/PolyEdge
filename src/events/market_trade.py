@@ -7,6 +7,7 @@ from utils.time import now_ts_ms
 
 @dataclass(slots=True, frozen=True)
 class MarketTradeEvent:
+    event_source: str
     exch_ts_ms: int
 
     market_id: str
