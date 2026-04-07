@@ -22,14 +22,14 @@ class ExecutionEngine:
         self._replace_ttl_s = 2.00
         self._replace_price_gap = 0.05
         self._replace_shares_gap = 0.10
-
+        taker_client.get_cash_balance()
         self._order_manager = OrderManager(maker_client, taker_client)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
         await self._order_manager.handle_order_event(event)
 
-    async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
-        return await self._order_manager.handle_trade_event(event)
+    async def handle_trade_event(self, event: MarketTradeEvent) -> None:
+        await self._order_manager.handle_trade_event(event)
 
     async def handle_desired_position(
         self, desired_position: DesiredPositionEvent

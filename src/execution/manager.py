@@ -18,7 +18,7 @@ logger = get_logger("MANAGER")
 
 _ZERO = 0.0
 _MATCHED_SHARES_RATE = 0.98
-_POSITION_SHARES_DUST = 0.02
+_POSITION_SHARES_DUST = 0.01
 
 
 @dataclass(slots=True)
@@ -115,6 +115,7 @@ class ManagedTrade:
     on_chain_pending_shares: float = 0.0
     on_chain_settled_shares: float = 0.0
     on_chain_failure_shares: float = 0.0
+    on_chain_takefee_shares: float = 0.0
 
 
 class OrderManager:
@@ -235,11 +236,10 @@ class OrderManager:
             else:
                 await self.handle_trade_event(event)
 
-        if order.role == Role.TAKER:
-            self._track_background_task(
-                self._sync_order_status(order_id),
-                name=f"sync-order-{order_id}",
-            )
+        self._track_background_task(
+            self._sync_order_status(order_id),
+            name=f"sync-order-{order_id}",
+        )
 
         if order.should_cancel:
             async with self._lock:
@@ -357,50 +357,33 @@ class OrderManager:
             order.is_cancelling = False
             order.log(error_message)
 
-        if (
-            "matched orders can't be canceled" in error_message
-            or "already canceled or matched" in error_message
-        ):
+        if "matched" in error_message or "canceled" in error_message:
             self._track_background_task(
                 self._sync_order_status(order_id),
                 name=f"sync-order-{order_id}",
             )
 
     async def _sync_order_status(self, order_id: str) -> None:
-        market_order = await asyncio.to_thread(self._maker_client.get_order_by_id, order_id)
-        if market_order is None:
+        order = await asyncio.to_thread(self._maker_client.get_order_by_id, order_id)
+        if order is None:
             logger.warning("sync order status failed: %s", order_id)
-            return
+        else:
+            await self.handle_order_event(order)
+            for trade_id in order.trade_ids:
+                self._track_background_task(
+                    self._sync_trade_status(trade_id),
+                    name=f"sync-trade-{trade_id}",
+                )
 
-        async with self._lock:
-            order = self._orders_by_order_id.get(order_id)
-            if order is None:
-                return
-            market_id = order.market.id
-            token_id = order.token.id
-
-        event = MarketOrderEvent(
-            exch_ts_ms=now_ts_ms(),
-            market_id=market_id,
-            token_id=token_id,
-            order_id=order_id,
-            trade_ids=market_order.trade_ids,
-            status=market_order.status,
-            shares=market_order.shares,
-            side=market_order.side,
-            type=market_order.type,
-            price=market_order.price,
-            matched_shares=market_order.matched_shares,
-        )
-        logger.info(
-            "sync order event: %s status=%s matched=%.6f",
-            order_id,
-            event.status,
-            event.matched_shares,
-        )
-        await self.handle_order_event(event)
+    async def _sync_trade_status(self, trade_id: str) -> None:
+        trade = await asyncio.to_thread(self._maker_client.get_trade_by_id, trade_id)
+        if trade is None:
+            logger.warning("sync trade status failed: %s", trade_id)
+        else:
+            await self.handle_trade_event(trade)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
+        self._maker_client.get_cash_balance()
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
@@ -440,11 +423,9 @@ class OrderManager:
                     order.status = ManagedOrderStatus.PART_MATCHED
                 else:
                     order.status = ManagedOrderStatus.FULL_MATCHED
-                    order.off_chain_invalid_shares = order.off_chain_pending_shares
-                    order.off_chain_pending_shares = _ZERO
 
         logger.debug(
-            "order %s status=%s matching=%.6f matched=%.6f canceled=%.6f",
+            "order %s status=%s pending=%.6f matched=%.6f canceled=%.6f",
             order.order_id,
             order.status,
             order.off_chain_pending_shares,
@@ -452,7 +433,8 @@ class OrderManager:
             order.off_chain_invalid_shares,
         )
 
-    async def handle_trade_event(self, event: MarketTradeEvent) -> CurrentPositionEvent | None:
+    async def handle_trade_event(self, event: MarketTradeEvent) -> None:
+        self._maker_client.get_cash_balance()
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
@@ -482,52 +464,50 @@ class OrderManager:
                     on_chain_pending_shares=event.shares,
                     on_chain_settled_shares=_ZERO,
                     on_chain_failure_shares=_ZERO,
+                    on_chain_takefee_shares=_ZERO,
                 )
 
             trade.updated_ts_ms = max(trade.updated_ts_ms, event.exch_ts_ms)
 
+            if event.role == Role.TAKER and event.side == Side.BUY:
+                net_shares, fee_shares = self._taker_client.calc_net_buy_shares(
+                    order.market, event.shares, event.price
+                )
+            else:
+                net_shares, fee_shares = event.shares, _ZERO
+
+            if event.role == Role.TAKER and event.side == Side.SELL:
+                net_amount, fee_amount = self._taker_client.calc_net_sell_amount(
+                    order.market, event.shares, event.price
+                )
+            else:
+                net_amount, fee_amount = round(event.shares * event.price, 6), _ZERO
+
             if event.status == MarketTradeStatus.CONFIRMED:
                 trade.status = ManagedTradeStatus.SUCCESS
                 trade.on_chain_pending_shares = _ZERO
-                trade.on_chain_settled_shares = trade.shares
+                trade.on_chain_settled_shares = net_shares
                 trade.on_chain_failure_shares = _ZERO
             elif event.status == MarketTradeStatus.FAILED:
                 trade.status = ManagedTradeStatus.FAILURE
                 trade.on_chain_pending_shares = _ZERO
                 trade.on_chain_settled_shares = _ZERO
-                trade.on_chain_failure_shares = trade.shares
+                trade.on_chain_failure_shares = net_shares
             else:
                 trade.status = ManagedTradeStatus.PENDING
-                trade.on_chain_pending_shares = trade.shares
+                trade.on_chain_pending_shares = net_shares
                 trade.on_chain_settled_shares = _ZERO
                 trade.on_chain_failure_shares = _ZERO
+            trade.on_chain_takefee_shares = fee_shares
 
             order.trades[event.trade_id] = trade
             self._trades_by_trade_id[event.trade_id] = trade
 
             if trade.status == ManagedTradeStatus.SUCCESS:
-                position = self._positions_by_token_id.get(event.token_id)
+                position = self._positions_by_token_id.get(trade.token_id)
                 realized_pnl = position.realized_pnl if position is not None else _ZERO
 
-                net_shares = (
-                    self._taker_client.calc_net_buy_shares(order.market, event.shares, event.price)
-                    if event.role == Role.TAKER and event.side == Side.BUY
-                    else None
-                )
-                net_amount = (
-                    self._taker_client.calc_net_sell_value(order.market, event.shares, event.price)
-                    if event.role == Role.TAKER and event.side == Side.BUY
-                    else None
-                )
-                self._apply_confirmed_trade(
-                    event.token_id,
-                    event.side,
-                    event.shares,
-                    event.price,
-                    event.exch_ts_ms,
-                    net_shares=net_shares,
-                    net_amount=net_amount,
-                )
+                self._apply_confirmed_trade(trade.side, trade.token_id, net_amount, net_shares)
 
                 position = self._positions_by_token_id[event.token_id]
                 pnl = position.realized_pnl - realized_pnl if event.side == Side.SELL else None
@@ -538,26 +518,25 @@ class OrderManager:
                         market_end_ms=order.market.end_ts_ms,
                         side=event.side,
                         token=order.token.key,
-                        shares=event.shares,
-                        price=event.price,
+                        shares=net_shares,
+                        price=round(net_amount / net_shares, 3),
                         pnl=pnl,
                     ),
                     name=f"send-trade-{event.trade_id}",
                 )
 
-                logger.debug("trade %s settled %.6f", trade.order_id, trade.shares)
-                return self._build_current_position_event(order.market, order.token)
+        logger.debug(
+            "trade %s status=%s net_shares=%.6f fee_shares=%.6f net_amount=%.6f fee_amount=%.6f",
+            trade.trade_id,
+            trade.status,
+            net_shares,
+            fee_shares,
+            net_amount,
+            fee_amount,
+        )
 
     def _apply_confirmed_trade(
-        self,
-        token_id: str,
-        side: Side,
-        shares: float,
-        price: float,
-        ts_ms: int,
-        *,
-        net_shares: float | None = None,
-        net_amount: float | None = None,
+        self, side: Side, token_id: str, amount: float, shares: float
     ) -> None:
         position = self._positions_by_token_id.get(token_id)
         if position is None:
@@ -565,30 +544,13 @@ class OrderManager:
             self._positions_by_token_id[token_id] = position
 
         if side == Side.BUY:
-            received_shares = net_shares if net_shares is not None else shares
-
-            position.cost = round(position.cost + shares * price, 6)
-            position.shares = round(position.shares + received_shares, 6)
+            position.cost = round(position.cost + amount, 6)
+            position.shares = round(position.shares + shares, 6)
         else:
-            holding_before = position.shares
-            reduced_shares = min(shares, holding_before)
-
-            avg_price = position.avg_price or _ZERO
-            cost = reduced_shares * avg_price
-
-            received_value = net_amount if net_amount is not None else reduced_shares * price
-
+            cost = shares * position.avg_price
             position.cost = round(position.cost - cost, 6)
-            position.shares = round(position.shares - reduced_shares, 6)
-            position.realized_pnl = round(position.realized_pnl + received_value - cost, 6)
-
-            if shares > reduced_shares:
-                logger.warning(
-                    "sell settled shares exceed holding: token=%s sell=%.6f holding=%.6f",
-                    token_id,
-                    shares,
-                    holding_before,
-                )
+            position.shares = round(position.shares - shares, 6)
+            position.realized_pnl = round(position.realized_pnl + amount - cost, 6)
 
         if position.shares <= _POSITION_SHARES_DUST:
             position.cost = _ZERO

@@ -1,3 +1,4 @@
+import math
 import time
 
 from py_clob_client.client import ClobClient
@@ -69,11 +70,17 @@ class TradeClient:
     def calc_fee(self, market: Market, shares: float, price: float) -> float:
         return round(self.fee_rate(market) * shares * price * (1 - price), 6)
 
-    def calc_net_buy_shares(self, market: Market, shares: float, price: float) -> float:
-        return round(shares * (1 - self.fee_rate(market) * (1 - price)), 6)
+    def calc_net_buy_shares(
+        self, market: Market, shares: float, price: float
+    ) -> tuple[float, float]:
+        fee_shares = _truncate_decimal(shares * self.fee_rate(market) * (1 - price), 5)
+        return round(shares - fee_shares, 6), fee_shares
 
-    def calc_net_sell_value(self, market: Market, shares: float, price: float) -> float:
-        return round(shares * price * (1 - self.fee_rate(market) * (1 - price)), 6)
+    def calc_net_sell_amount(
+        self, market: Market, shares: float, price: float
+    ) -> tuple[float, float]:
+        fee_amount = _truncate_decimal(shares * price * self.fee_rate(market) * (1 - price), 5)
+        return round(shares * price - fee_amount, 6), fee_amount
 
     def get_cash_balance(self) -> float:
         params = BalanceAllowanceParams(
@@ -267,6 +274,11 @@ class TakerTradeClient(TradeClient):
     role: Role = Role.TAKER
     post_only: bool = False
     order_type: OrderType = OrderType.FOK  # type: ignore
+
+
+def _truncate_decimal(x, digits):
+    factor = 10**digits
+    return math.trunc(x * factor) / factor
 
 
 def _error_message(error: PolyApiException) -> str:

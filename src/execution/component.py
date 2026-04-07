@@ -51,9 +51,7 @@ class ExecutionComponent:
 
     async def _market_trade_loop(self, events: Subscription[MarketTradeEvent]) -> None:
         async for trade in events:
-            position_event = await self._engine.handle_trade_event(trade)
-            if position_event is not None:
-                await self._bus.publish(position_event)
+            await self._engine.handle_trade_event(trade)
 
     async def _desired_position_loop(self, targets: Subscription[DesiredPositionEvent]) -> None:
         async for target in targets:

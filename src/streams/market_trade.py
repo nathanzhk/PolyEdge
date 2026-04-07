@@ -92,7 +92,7 @@ class MarketTradeStream:
 def build_order_event(message: dict, *, source: str) -> MarketOrderEvent | None:
     logger.debug("%s order event: %s", source, message)
     try:
-        ts_ms = message["timestamp"]
+        ts_ms = message.get("timestamp") or None
         trade_ids = message["associate_trades"]
         return MarketOrderEvent(
             event_source=source,
@@ -115,7 +115,7 @@ def build_order_event(message: dict, *, source: str) -> MarketOrderEvent | None:
 def build_trade_event(message: dict, proxy_wallet: str, *, source: str) -> MarketTradeEvent | None:
     logger.debug("%s trade event: %s", source, message)
     try:
-        ts_ms = message["timestamp"]
+        ts_ms = message.get("timestamp") or None
         if str(message.get("maker_address")).lower() == proxy_wallet.lower():
             token_id = message["asset_id"]
             order_id = message["taker_order_id"]
