@@ -4,8 +4,8 @@ import asyncio
 
 from clients.polymarket_clob import TradeClient
 from enums import Side
-from events import CurrentPositionEvent, DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
-from execution.manager import ManagedOrder, OrderManager
+from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
+from execution.manager import EventPublisher, ManagedOrder, OrderManager
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -17,13 +17,23 @@ MAKER_SHARES_THRESHOLD = 5.00
 
 
 class ExecutionEngine:
-    def __init__(self, maker_client: TradeClient, taker_client: TradeClient) -> None:
+    def __init__(
+        self,
+        maker_client: TradeClient,
+        taker_client: TradeClient,
+        *,
+        event_publisher: EventPublisher,
+    ) -> None:
         self._lock = asyncio.Lock()
         self._replace_ttl_s = 2.00
         self._replace_price_gap = 0.05
         self._replace_shares_gap = 0.10
         taker_client.get_cash_balance()
-        self._order_manager = OrderManager(maker_client, taker_client)
+        self._order_manager = OrderManager(
+            maker_client,
+            taker_client,
+            event_publisher=event_publisher,
+        )
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
         await self._order_manager.handle_order_event(event)
@@ -31,9 +41,7 @@ class ExecutionEngine:
     async def handle_trade_event(self, event: MarketTradeEvent) -> None:
         await self._order_manager.handle_trade_event(event)
 
-    async def handle_desired_position(
-        self, desired_position: DesiredPositionEvent
-    ) -> CurrentPositionEvent:
+    async def handle_desired_position(self, desired_position: DesiredPositionEvent) -> None:
         async with self._lock:
             current_position, active_order = await self._order_manager.get_position_by_token(
                 desired_position.market, desired_position.token
@@ -63,11 +71,6 @@ class ExecutionEngine:
                     shares=delta,
                     active_order=active_order,
                 )
-
-            updated_position, _ = await self._order_manager.get_position_by_token(
-                desired_position.market, desired_position.token
-            )
-            return updated_position
 
     async def _reconcile_order(
         self,

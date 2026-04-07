@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 from clients.polymarket_clob import TradeClient
 from enums import ManagedOrderStatus, ManagedTradeStatus, MarketTradeStatus, Role, Side
@@ -19,6 +19,10 @@ logger = get_logger("MANAGER")
 _ZERO = 0.0
 _MATCHED_SHARES_RATE = 0.98
 _POSITION_SHARES_DUST = 0.01
+
+
+class EventPublisher(Protocol):
+    async def publish(self, event: object) -> None: ...
 
 
 @dataclass(slots=True)
@@ -91,6 +95,10 @@ class ManagedOrder:
     def on_chain_failure_shares(self) -> float:
         return round(sum(trade.on_chain_failure_shares for trade in self.trades.values()), 6)
 
+    @property
+    def on_chain_takefee_shares(self) -> float:
+        return round(sum(trade.on_chain_takefee_shares for trade in self.trades.values()), 6)
+
     def log(self, message: str) -> None:
         self.audit_records.append((now_ts_ms(), message))
 
@@ -119,10 +127,17 @@ class ManagedTrade:
 
 
 class OrderManager:
-    def __init__(self, maker_client: TradeClient, taker_client: TradeClient) -> None:
+    def __init__(
+        self,
+        maker_client: TradeClient,
+        taker_client: TradeClient,
+        *,
+        event_publisher: EventPublisher,
+    ) -> None:
         self._lock = asyncio.Lock()
         self._maker_client = maker_client
         self._taker_client = taker_client
+        self._event_publisher = event_publisher
 
         self._tokens_by_token_id: dict[str, Token] = {}
         self._orders_by_local_id: dict[str, ManagedOrder] = {}
@@ -184,24 +199,25 @@ class OrderManager:
             self._tokens_by_token_id[token.id] = token
 
         self._track_background_task(
-            self._submit_order_worker(local_id),
+            self._submit_order_worker(local_id, market, token),
             name=f"submit-order-{local_id}",
         )
 
-    async def _submit_order_worker(self, local_id: str) -> None:
+        await self._publish_current_position_event(market, token)
+
+    async def _submit_order_worker(self, local_id: str, market: Market, token: Token) -> None:
         async with self._lock:
             order = self._orders_by_local_id.get(local_id)
             if order is None:
                 return
             client = self._maker_client if order.role == Role.MAKER else self._taker_client
             submit_order_func = client.buy if order.side == Side.BUY else client.sell
-            token = order.token
             shares = order.shares
             price = order.price
             order.log("submitting")
 
         try:
-            order_id = await asyncio.to_thread(submit_order_func, token, shares, price)
+            order_id = await asyncio.to_thread(submit_order_func, order.token, shares, price)
         except Exception:
             await self._handle_submit_order_failed(local_id)
             raise
@@ -210,6 +226,8 @@ class OrderManager:
             await self._handle_submit_order_success(local_id, order_id)
         else:
             await self._handle_submit_order_failed(local_id)
+
+        await self._publish_current_position_event(market, token)
 
     async def _handle_submit_order_success(self, local_id: str, order_id: str) -> None:
         logger.info("submit order success: %s => %s", local_id, order_id)
@@ -312,12 +330,12 @@ class OrderManager:
             order.log(f"cancel requested: {reason}")
 
         self._track_background_task(
-            self._cancel_order_worker(order.order_id),
+            self._cancel_order_worker(order.order_id, order.market, order.token),
             name=f"cancel-order-{order.order_id}",
         )
         return True
 
-    async def _cancel_order_worker(self, order_id: str) -> None:
+    async def _cancel_order_worker(self, order_id: str, market: Market, token: Token) -> None:
         try:
             is_success, error_message = await asyncio.to_thread(
                 self._maker_client.cancel_order_by_id, order_id
@@ -330,6 +348,8 @@ class OrderManager:
             await self._handle_cancel_order_success(order_id)
         else:
             await self._handle_cancel_order_failed(order_id, error_message.lower())
+
+        await self._publish_current_position_event(market, token)
 
     async def _handle_cancel_order_success(self, order_id: str) -> None:
         logger.info("cancel order success: %s", order_id)
@@ -424,6 +444,10 @@ class OrderManager:
                 else:
                     order.status = ManagedOrderStatus.FULL_MATCHED
 
+            market = order.market
+            token = order.token
+
+        await self._publish_current_position_event(market, token)
         logger.debug(
             "order %s status=%s pending=%.6f matched=%.6f canceled=%.6f",
             order.order_id,
@@ -525,6 +549,10 @@ class OrderManager:
                     name=f"send-trade-{event.trade_id}",
                 )
 
+            market = order.market
+            token = order.token
+
+        await self._publish_current_position_event(market, token)
         logger.debug(
             "trade %s status=%s net_shares=%.6f fee_shares=%.6f net_amount=%.6f fee_amount=%.6f",
             trade.trade_id,
@@ -559,33 +587,43 @@ class OrderManager:
     def _build_current_position_event(self, market: Market, token: Token) -> CurrentPositionEvent:
 
         opening_shares = _ZERO
+        open_settling_shares = _ZERO
         closing_shares = _ZERO
+        close_settling_shares = _ZERO
         for order in self._orders_by_local_id.values():
             if order.token.id != token.id:
                 continue
-            in_flight = (
-                order.off_chain_pending_shares
-                + order.off_chain_matched_shares
+            settling_shares = (
+                order.off_chain_matched_shares
                 - order.on_chain_settled_shares
                 - order.on_chain_failure_shares
+                - order.on_chain_takefee_shares
             )
-            if in_flight > _ZERO:
-                if order.side == Side.BUY:
-                    opening_shares += in_flight
-                else:
-                    closing_shares += in_flight
+            if order.side == Side.BUY:
+                opening_shares += order.off_chain_pending_shares
+                open_settling_shares += settling_shares
+            else:
+                closing_shares += order.off_chain_pending_shares
+                close_settling_shares += settling_shares
 
         position = self._positions_by_token_id.get(token.id)
         return CurrentPositionEvent(
             token=token,
             market=market,
             opening_shares=round(opening_shares, 6),
-            holding_shares=position.shares if position is not None else _ZERO,
+            open_settling_shares=round(open_settling_shares, 6),
             closing_shares=round(closing_shares, 6),
-            holding_avg_price=position.avg_price if position is not None else _ZERO,
+            close_settling_shares=round(close_settling_shares, 6),
             holding_cost=position.cost if position is not None else _ZERO,
+            holding_shares=position.shares if position is not None else _ZERO,
+            holding_avg_price=position.avg_price if position is not None else _ZERO,
             realized_pnl=position.realized_pnl if position is not None else _ZERO,
         )
+
+    async def _publish_current_position_event(self, market: Market, token: Token) -> None:
+        async with self._lock:
+            event = self._build_current_position_event(market, token)
+        await self._event_publisher.publish(event)
 
     def _track_background_task(self, coroutine: Coroutine[Any, Any, None], *, name: str) -> None:
         task = asyncio.create_task(coroutine, name=name)

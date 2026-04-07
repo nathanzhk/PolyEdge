@@ -10,12 +10,20 @@ class CurrentPositionEvent:
     token: Token
     market: Market
     opening_shares: float
-    holding_shares: float
+    open_settling_shares: float
     closing_shares: float
+    close_settling_shares: float
     holding_cost: float
+    holding_shares: float
     holding_avg_price: float
     realized_pnl: float = 0.0
 
     @property
     def is_active(self) -> bool:
-        return self.opening_shares > 0 or self.holding_shares > 0 or self.closing_shares > 0
+        return (
+            self.opening_shares > 0
+            or self.open_settling_shares > 0
+            or self.closing_shares > 0
+            or self.close_settling_shares > 0
+            or self.holding_shares > 0
+        )

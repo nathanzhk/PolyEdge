@@ -55,8 +55,7 @@ class ExecutionComponent:
 
     async def _desired_position_loop(self, targets: Subscription[DesiredPositionEvent]) -> None:
         async for target in targets:
-            position_event = await self._engine.handle_desired_position(target)
-            await self._bus.publish(position_event)
+            await self._engine.handle_desired_position(target)
 
 
 def execution_component() -> ComponentFactory:

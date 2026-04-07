@@ -271,27 +271,37 @@ def _log_event(event: RuntimeStateEvent) -> None:
         _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
     )
     logger.info(
-        "UP | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
+        "UP | open %.6f | open settling %.6f | close %.6f | close settling %.6f",
         event.yes_token_position.opening_shares,
+        event.yes_token_position.open_settling_shares,
+        event.yes_token_position.closing_shares,
+        event.yes_token_position.close_settling_shares,
+    ) if event.yes_token_position is not None else ...
+    logger.info(
+        "UP | hold %.6f @ %.2f %s | PnL %s",
         event.yes_token_position.holding_shares,
         event.yes_token_position.holding_avg_price,
         _fmt_signed_usd(
             event.yes_token_position.holding_shares * event.yes_token_quote.best_bid
             - event.yes_token_position.holding_cost
         ),
-        event.yes_token_position.closing_shares,
         _fmt_signed_usd(event.yes_token_position.realized_pnl),
     ) if event.yes_token_position is not None else ...
     logger.info(
-        "DN | open %.6f | hold %.6f @ %.2f %s | close %.6f | PnL %s",
+        "DN | open %.6f | open settling %.6f | close %.6f | close settling %.6f",
         event.no_token_position.opening_shares,
+        event.no_token_position.open_settling_shares,
+        event.no_token_position.closing_shares,
+        event.no_token_position.close_settling_shares,
+    ) if event.no_token_position is not None else ...
+    logger.info(
+        "DN | hold %.6f @ %.2f %s | PnL %s",
         event.no_token_position.holding_shares,
         event.no_token_position.holding_avg_price,
         _fmt_signed_usd(
             event.no_token_position.holding_shares * event.no_token_quote.best_bid
             - event.no_token_position.holding_cost
         ),
-        event.no_token_position.closing_shares,
         _fmt_signed_usd(event.no_token_position.realized_pnl),
     ) if event.no_token_position is not None else ...
 

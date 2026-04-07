@@ -55,12 +55,17 @@ ComponentFactory = Callable[[RuntimeContext], RuntimeComponent]
 class Runtime:
     def __init__(self, *, market: type[Market], symbol: str, strategy: Strategy) -> None:
         self._component_factories: list[ComponentFactory] = []
+        bus = EventBus()
         maker_client = MakerTradeClient()
         taker_client = TakerTradeClient()
         self._context = RuntimeContext(
-            bus=EventBus(),
+            bus=bus,
             strategy_engine=StrategyEngine(strategy),
-            execution_engine=ExecutionEngine(maker_client, taker_client),
+            execution_engine=ExecutionEngine(
+                maker_client,
+                taker_client,
+                event_publisher=bus,
+            ),
             market_quote_stream=MarketQuoteStream(
                 market, on_switch=[maker_client.warm_up, taker_client.warm_up]
             ),
