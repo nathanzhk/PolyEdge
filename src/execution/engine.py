@@ -48,12 +48,7 @@ class ExecutionEngine:
             )
 
             desired_shares = round(desired_position.shares, 6)
-            current_shares = round(
-                current_position.opening_shares
-                + current_position.holding_shares
-                - current_position.closing_shares,
-                6,
-            )
+            current_shares = current_position.effective_shares
 
             if desired_shares > current_shares:
                 delta = round(desired_shares - current_shares, 6)
@@ -65,10 +60,13 @@ class ExecutionEngine:
                 )
             elif desired_shares < current_shares:
                 delta = round(current_shares - desired_shares, 6)
+                sell_shares = delta
+                if active_order is None or active_order.side == Side.SELL:
+                    sell_shares = min(delta, current_position.sellable_shares)
                 await self._reconcile_order(
                     desired_position,
                     side=Side.SELL,
-                    shares=delta,
+                    shares=sell_shares,
                     active_order=active_order,
                 )
 

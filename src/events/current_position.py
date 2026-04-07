@@ -19,6 +19,29 @@ class CurrentPositionEvent:
     realized_pnl: float = 0.0
 
     @property
+    def effective_shares(self) -> float:
+        """Position size after all pending and settling orders finish."""
+        return round(
+            self.opening_shares
+            + self.open_settling_shares
+            + self.holding_shares
+            - self.closing_shares
+            - self.close_settling_shares,
+            6,
+        )
+
+    @property
+    def sellable_shares(self) -> float:
+        """Held shares that are not already committed to pending or settling sells."""
+        return max(
+            round(
+                self.holding_shares - self.closing_shares - self.close_settling_shares,
+                6,
+            ),
+            0.0,
+        )
+
+    @property
     def is_active(self) -> bool:
         return (
             self.opening_shares > 0

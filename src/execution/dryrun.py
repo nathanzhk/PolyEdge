@@ -113,8 +113,12 @@ class PaperExecutionEngine:
                 )
             elif desired_shares < current_shares:
                 delta = round(current_shares - desired_shares, 6)
+                sellable_shares = max(round(holding_shares - closing_shares, 6), _ZERO)
+                sell_shares = delta
+                if active_order is None or active_order.side == Side.SELL:
+                    sell_shares = min(delta, sellable_shares)
                 self._reconcile_order(
-                    desired, side=Side.SELL, shares=delta, active_order=active_order
+                    desired, side=Side.SELL, shares=sell_shares, active_order=active_order
                 )
 
         return ()
@@ -317,8 +321,10 @@ class PaperExecutionEngine:
             token=token,
             market=market,
             opening_shares=round(opening_shares, 6),
+            open_settling_shares=_ZERO,
             holding_shares=position.shares if position else _ZERO,
             closing_shares=round(closing_shares, 6),
+            close_settling_shares=_ZERO,
             holding_avg_price=position.avg_price if position else None,
             holding_cost=position.cost if position else _ZERO,
             realized_pnl=position.realized_pnl if position else _ZERO,
