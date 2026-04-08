@@ -120,6 +120,13 @@ class PaperExecutionEngine:
                 self._reconcile_order(
                     desired, side=Side.SELL, shares=sell_shares, active_order=active_order
                 )
+            elif active_order is not None:
+                self._reconcile_order(
+                    desired,
+                    side=active_order.side,
+                    shares=active_order.shares,
+                    active_order=active_order,
+                )
 
         return ()
 

@@ -69,6 +69,13 @@ class ExecutionEngine:
                     shares=sell_shares,
                     active_order=active_order,
                 )
+            elif active_order is not None:
+                await self._reconcile_order(
+                    desired_position,
+                    side=active_order.side,
+                    shares=active_order.off_chain_pending_shares,
+                    active_order=active_order,
+                )
 
     async def _reconcile_order(
         self,
