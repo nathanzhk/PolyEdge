@@ -26,7 +26,7 @@ class ExecutionEngine:
     ) -> None:
         self._lock = asyncio.Lock()
         self._replace_ttl_s = 2.00
-        self._replace_price_gap = 0.05
+        self._replace_price_gap = 0.01
         self._replace_shares_gap = 0.10
         taker_client.get_cash_balance()
         self._order_manager = OrderManager(

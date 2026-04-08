@@ -254,10 +254,11 @@ class OrderManager:
             else:
                 await self.handle_trade_event(event)
 
-        self._track_background_task(
-            self._sync_order_status(order_id),
-            name=f"sync-order-{order_id}",
-        )
+        if order.role == Role.TAKER:
+            self._track_background_task(
+                self._sync_order_status(order_id),
+                name=f"sync-order-{order_id}",
+            )
 
         if order.should_cancel:
             async with self._lock:
@@ -389,11 +390,11 @@ class OrderManager:
             logger.warning("sync order status failed: %s", order_id)
         else:
             await self.handle_order_event(order)
-            for trade_id in order.trade_ids:
-                self._track_background_task(
-                    self._sync_trade_status(trade_id),
-                    name=f"sync-trade-{trade_id}",
-                )
+            # for trade_id in order.trade_ids:
+            #     self._track_background_task(
+            #         self._sync_trade_status(trade_id),
+            #         name=f"sync-trade-{trade_id}",
+            #     )
 
     async def _sync_trade_status(self, trade_id: str) -> None:
         trade = await asyncio.to_thread(self._maker_client.get_trade_by_id, trade_id)
@@ -403,8 +404,6 @@ class OrderManager:
             await self.handle_trade_event(trade)
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
-        self._maker_client.get_cash_balance()
-        self._maker_client.get_token_shares(event.token_id)
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
@@ -456,8 +455,6 @@ class OrderManager:
         )
 
     async def handle_trade_event(self, event: MarketTradeEvent) -> None:
-        self._maker_client.get_cash_balance()
-        self._maker_client.get_token_shares(event.token_id)
         async with self._lock:
             order = self._orders_by_order_id.get(event.order_id)
             if order is None:
