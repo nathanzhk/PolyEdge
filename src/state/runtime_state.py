@@ -252,7 +252,7 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
 
 
 def _log_event(event: RuntimeStateEvent) -> None:
-    logger.debug(
+    logger.info(
         "UP %.2fms | DN %.2fms | BTC %.2fms | OHLCV %.2fms",
         elapsed_ms_since(event.yes_token_quote.recv_mono_ns),
         elapsed_ms_since(event.no_token_quote.recv_mono_ns),

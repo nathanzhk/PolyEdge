@@ -120,8 +120,7 @@ class FlashStrategy:
                 token=market.yes_token,
                 shares=self.config.entry_shares,
                 best_bid=yes_quote.best_bid,
-                best_ask=yes_quote.best_ask + 0.1,
-                force=True,
+                best_ask=yes_quote.best_ask,
             )
         if momentum == _Momentum.DOWN:
             if no_quote.best_ask > self.config.max_entry_ask:
@@ -140,8 +139,7 @@ class FlashStrategy:
                 token=market.no_token,
                 shares=self.config.entry_shares,
                 best_bid=no_quote.best_bid,
-                best_ask=no_quote.best_ask + 0.1,
-                force=True,
+                best_ask=no_quote.best_ask,
             )
         return None
 
@@ -161,8 +159,7 @@ class FlashStrategy:
                 token=position.token,
                 shares=self.config.entry_shares,
                 best_bid=_bid_for_token(yes_quote, no_quote, position.token),
-                best_ask=_ask_for_token(yes_quote, no_quote, position.token) + 0.5,
-                force=True,
+                best_ask=_ask_for_token(yes_quote, no_quote, position.token),
             )
         # Momentum gone or reversed — cancel entry
         logger.info("cancel entry %s, momentum=%s", position.token.key, momentum.name)
