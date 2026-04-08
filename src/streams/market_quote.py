@@ -11,7 +11,7 @@ from websockets.exceptions import ConnectionClosed
 from events import MarketQuoteEvent
 from markets.base import Market, Token
 from utils.env import Env
-from utils.logger import get_logger
+from utils.logger import get_logger, switch_log_file
 from utils.time import sleep_until
 
 _SWITCH_BEFORE_END_S = 5
@@ -41,6 +41,7 @@ class MarketQuoteStream:
             no_token=market.no_token,
             market=market,
         )
+        switch_log_file(market.slug)
 
     def __aiter__(self) -> AsyncIterator[MarketQuoteEvent]:
         return self._stream()
@@ -139,6 +140,7 @@ class MarketQuoteStream:
                 no_token=next_market.no_token,
                 market=next_market,
             )
+            switch_log_file(next_market.slug)
             for callback in self._on_switch:
                 await asyncio.to_thread(callback, next_market)
             await _update_subscribe(ws, ws_lock, "subscribe", next_market)
