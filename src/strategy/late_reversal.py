@@ -13,8 +13,8 @@ logger = get_logger("LATE_REVERSAL")
 @dataclass(slots=True, frozen=True)
 class _Config:
     window_sec: float = 10.0
-    max_entry_ask: float = 0.80
     entry_shares: float = 5.0
+    max_entry_ask: float = 0.80
 
 
 class LateReversalStrategy:
@@ -52,33 +52,16 @@ class LateReversalStrategy:
         # Buy the side that just flipped to (curr_side)
         if curr_side == "UP":
             token = market.yes_token
-            best_bid = state.yes_token_quote.best_bid
-            best_ask = state.yes_token_quote.best_ask
         else:
             token = market.no_token
-            best_bid = state.no_token_quote.best_bid
-            best_ask = state.no_token_quote.best_ask
 
-        if best_ask > self.config.max_entry_ask:
-            logger.info(
-                "ask %.2f > max %.2f, skip",
-                best_ask,
-                self.config.max_entry_ask,
-            )
-            return None
-
-        logger.info(
-            "entry %s ask=%.2f shares=%.2f",
-            token.key,
-            best_ask,
-            self.config.entry_shares,
-        )
         return DesiredPositionEvent(
             market=market,
             token=token,
             shares=self.config.entry_shares,
-            best_bid=best_bid,
-            best_ask=best_ask,
+            best_bid=self.config.max_entry_ask,
+            best_ask=self.config.max_entry_ask,
+            force=True,
         )
 
 
