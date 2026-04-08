@@ -191,8 +191,12 @@ class TradeClient:
 
     def cancel_order_by_id(self, order_id: str) -> tuple[bool, str]:
         try:
-            # params = OrderPayload(orderID=order_id)
-            resp = self.client.cancel(order_id)
+            start_ns = time.perf_counter_ns()
+            try:
+                resp = self.client.cancel(order_id)
+            finally:
+                latency_ms = (time.perf_counter_ns() - start_ns) / 1_000_000
+                self.logger.info("cancel order latency %.3f ms", latency_ms)
             self.logger.debug("%r", resp)
         except PolyApiException as e:
             self.logger.debug("%r", e.error_msg)
@@ -214,7 +218,13 @@ class TradeClient:
         return False, failed_reason
 
     def _get_balance(self, params: BalanceAllowanceParams) -> float:
-        resp = self.client.get_balance_allowance(params)
+        start_ns = time.perf_counter_ns()
+        try:
+            resp = self.client.get_balance_allowance(params)
+        finally:
+            latency_ms = (time.perf_counter_ns() - start_ns) / 1_000_000
+            self.logger.info("get balance latency %.3f ms", latency_ms)
+
         if not isinstance(resp, dict):
             return 0.0
         balance = resp.get("balance", "0")
