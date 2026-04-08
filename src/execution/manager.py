@@ -420,8 +420,10 @@ class OrderManager:
                 order.off_chain_matched_shares = max(
                     order.off_chain_matched_shares, event.matched_shares
                 )
-                order.off_chain_invalid_shares = min(
-                    order.off_chain_invalid_shares, event.unmatched_shares
+                order.off_chain_invalid_shares = (
+                    round(order.shares - order.off_chain_matched_shares, 6)
+                    if order.shares > order.off_chain_matched_shares
+                    else _ZERO
                 )
                 order.off_chain_pending_shares = _ZERO
                 if order.off_chain_matched_shares == _ZERO:
