@@ -24,3 +24,7 @@ class MarketTradeEvent:
 
     recv_ts_ms: int = field(default_factory=now_ts_ms)
     recv_mono_ns: int = field(default_factory=perf_counter_ns)
+
+    @property
+    def is_success(self) -> bool:
+        return self.status == MarketTradeStatus.MINED or self.status == MarketTradeStatus.CONFIRMED

@@ -90,9 +90,9 @@ class TradeClient:
         self.logger.debug("cash balance: %.6f", balance)
         return balance
 
-    def get_token_shares(self, token: Token) -> float:
+    def get_token_shares(self, token_id: str) -> float:
         params = BalanceAllowanceParams(
-            token_id=token.id,
+            token_id=token_id,
             asset_type=AssetType.CONDITIONAL,  # type: ignore
         )
         shares = self._get_balance(params)
