@@ -36,6 +36,7 @@ from streams import (
 @dataclass(frozen=True, slots=True)
 class RuntimeContext:
     bus: EventBus
+    market: Market
     strategy_engine: StrategyEngine
     execution_engine: ExecutionEngine
     market_quote_stream: AsyncIterable[MarketQuoteEvent]
@@ -53,22 +54,21 @@ ComponentFactory = Callable[[RuntimeContext], RuntimeComponent]
 
 
 class Runtime:
-    def __init__(self, *, market: type[Market], symbol: str, strategy: Strategy) -> None:
+    def __init__(self, *, market: Market, symbol: str, strategy: Strategy) -> None:
         self._component_factories: list[ComponentFactory] = []
         bus = EventBus()
         maker_client = MakerTradeClient()
         taker_client = TakerTradeClient()
+        maker_client.warm_up(market)
+        taker_client.warm_up(market)
         self._context = RuntimeContext(
             bus=bus,
+            market=market,
             strategy_engine=StrategyEngine(strategy),
             execution_engine=ExecutionEngine(
-                maker_client,
-                taker_client,
-                event_publisher=bus,
+                market, maker_client, taker_client, event_publisher=bus
             ),
-            market_quote_stream=MarketQuoteStream(
-                market, on_switch=[maker_client.warm_up, taker_client.warm_up]
-            ),
+            market_quote_stream=MarketQuoteStream(market),
             market_trade_stream=MarketTradeStream(maker_client.get_credentials()),
             crypto_quote_stream=CryptoQuoteStream(symbol),
             crypto_ohlcv_stream=CryptoOHLCVStream(symbol),
