@@ -30,23 +30,21 @@ _NULL_HANDLER = logging.NullHandler()
 _QUEUE_HANDLER: QueueHandler | None = None
 _QUEUE_LISTENER: QueueListener | None = None
 _CONSOLE_HANDLER: logging.Handler | None = None
-_FILE_HANDLER: "_SwitchableFileHandler | None" = None
+_FILE_HANDLER: "_LogFileHandler | None" = None
 
 
-class _MarketQueueHandler(QueueHandler):
-    def __init__(
-        self, log_queue: queue.Queue[logging.LogRecord], file_handler: "_SwitchableFileHandler"
-    ):
+class _LogQueueHandler(QueueHandler):
+    def __init__(self, log_queue: queue.Queue[logging.LogRecord], file_handler: "_LogFileHandler"):
         super().__init__(log_queue)
         self._file_handler = file_handler
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
         record = super().prepare(record)
-        record.market_log_file = self._file_handler.log_file
+        record.log_file = self._file_handler.log_file
         return record
 
 
-class _SwitchableFileHandler(logging.Handler):
+class _LogFileHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__(logging.DEBUG)
         self._lock = RLock()
@@ -56,7 +54,7 @@ class _SwitchableFileHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            log_file = getattr(record, "market_log_file", None)
+            log_file = getattr(record, "log_file", None)
             with self._lock:
                 if log_file is not None and log_file != self._active_log_file:
                     self._open_log_file(log_file)
@@ -124,11 +122,11 @@ def configure_logging() -> None:
         return
 
     now = datetime.now()
-    _FILE_HANDLER = _SwitchableFileHandler()
+    _FILE_HANDLER = _LogFileHandler()
     _FILE_HANDLER.set_log_file(_build_log_file("startup", now))
 
     log_queue: queue.Queue[logging.LogRecord] = queue.Queue()
-    _QUEUE_HANDLER = _MarketQueueHandler(log_queue, _FILE_HANDLER)
+    _QUEUE_HANDLER = _LogQueueHandler(log_queue, _FILE_HANDLER)
     _QUEUE_HANDLER.setLevel(logging.DEBUG)
     _QUEUE_LISTENER = QueueListener(log_queue, _FILE_HANDLER, respect_handler_level=True)
     _QUEUE_LISTENER.start()
@@ -143,7 +141,7 @@ def configure_logging() -> None:
         _configure_logger(logger)
 
 
-def switch_log_file(name: str) -> Path | None:
+def set_log_file(name: str) -> Path | None:
     if _FILE_HANDLER is None:
         return None
     log_file = _build_log_file(name, datetime.now())

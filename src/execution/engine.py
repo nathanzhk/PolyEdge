@@ -6,6 +6,7 @@ from clients.polymarket_clob import TradeClient
 from enums import Side
 from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
 from execution.manager import EventPublisher, ManagedOrder, OrderManager
+from markets.base import Market
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
@@ -19,12 +20,14 @@ MAKER_SHARES_THRESHOLD = 5.00
 class ExecutionEngine:
     def __init__(
         self,
+        market: Market,
         maker_client: TradeClient,
         taker_client: TradeClient,
         *,
         event_publisher: EventPublisher,
     ) -> None:
         self._lock = asyncio.Lock()
+        self._market = market
         self._replace_ttl_s = 2.00
         self._replace_price_gap = 0.01
         self._replace_shares_gap = 0.10
@@ -36,9 +39,15 @@ class ExecutionEngine:
         )
 
     async def handle_order_event(self, event: MarketOrderEvent) -> None:
+        if event.market_id != self._market.id:
+            logger.debug("ignore order event for other market: %s", event.market_id)
+            return
         await self._order_manager.handle_order_event(event)
 
     async def handle_trade_event(self, event: MarketTradeEvent) -> None:
+        if event.market_id != self._market.id:
+            logger.debug("ignore trade event for other market: %s", event.market_id)
+            return
         await self._order_manager.handle_trade_event(event)
 
     async def handle_desired_position(self, desired_position: DesiredPositionEvent) -> None:

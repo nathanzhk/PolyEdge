@@ -9,6 +9,7 @@ from event_bus import (
     Subscription,
 )
 from events import CryptoOHLCVEvent, CryptoQuoteEvent, CurrentPositionEvent, MarketQuoteEvent
+from markets.base import Market
 from state.runtime_state import RuntimeState
 
 if TYPE_CHECKING:
@@ -16,9 +17,9 @@ if TYPE_CHECKING:
 
 
 class RuntimeStateComponent:
-    def __init__(self, *, bus: EventBus) -> None:
+    def __init__(self, *, bus: EventBus, market: Market) -> None:
         self._bus = bus
-        self._state = RuntimeState()
+        self._state = RuntimeState(market)
 
     def start(self, tasks: asyncio.TaskGroup) -> None:
         market_quote_events = self._bus.subscribe(
@@ -79,4 +80,7 @@ class RuntimeStateComponent:
 
 
 def runtime_state_component() -> ComponentFactory:
-    return lambda context: RuntimeStateComponent(bus=context.bus)
+    return lambda context: RuntimeStateComponent(
+        bus=context.bus,
+        market=context.market,
+    )

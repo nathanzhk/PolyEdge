@@ -11,7 +11,7 @@ from events import (
     MarketQuoteEvent,
     RuntimeStateEvent,
 )
-from markets.base import Market, Token
+from markets.base import Market
 from utils.logger import get_logger
 from utils.time import elapsed_ms_since, fmt_duration_s, now_ts_s
 
@@ -50,13 +50,13 @@ class Indicators:
 
 
 class RuntimeState:
-    def __init__(self) -> None:
+    def __init__(self, market: Market) -> None:
         self._lock = asyncio.Lock()
         self._last_signature: tuple[Any, ...] | None = None
 
-        self._yes_token: Token
-        self._no_token: Token
-        self._market: Market | None = None
+        self._yes_token = market.yes_token
+        self._no_token = market.no_token
+        self._market = market
 
         self.indicators = Indicators()
 
@@ -77,8 +77,9 @@ class RuntimeState:
         quote: MarketQuoteEvent,
     ) -> RuntimeStateEvent | None:
         async with self._lock:
-            if self._market is None or quote.market.id != self._market.id:
-                self._switch_market(quote.market)
+            if quote.market.id != self._market.id:
+                logger.debug("ignore quote for other market: %s", quote.market.id)
+                return None
             if quote.token.id == self._yes_token.id:
                 self._yes_quote = quote
             if quote.token.id == self._no_token.id:
@@ -135,28 +136,16 @@ class RuntimeState:
         self, position: CurrentPositionEvent
     ) -> RuntimeStateEvent | None:
         async with self._lock:
+            if position.market.id != self._market.id:
+                logger.debug("ignore position for other market: %s", position.market.id)
+                return None
             if position.token.id == self._yes_token.id:
                 self._yes_position = position
             elif position.token.id == self._no_token.id:
                 self._no_position = position
             return self._event_if_changed("current_position")
 
-    def _switch_market(self, market: Market) -> None:
-        self._yes_token = market.yes_token
-        self._no_token = market.no_token
-        self._yes_quote = None
-        self._no_quote = None
-        self._market = market
-        self._beat_price = None
-        self._beat_offset_ms = None
-        self._yes_position = None
-        self._no_position = None
-        self.indicators.reset()
-        logger.info("%s", market.title)
-
     def _record_beat_price(self, quote: CryptoQuoteEvent) -> None:
-        if self._market is None:
-            return
         beat_offset_ms = quote.recv_ts_ms - self._market.start_ts_ms
         beat_offset_abs_ms = abs(beat_offset_ms)
         if beat_offset_abs_ms > _MAX_BEAT_OFFSET_MS:
@@ -189,12 +178,11 @@ class RuntimeState:
 
     def _build_event(self, reason: str) -> RuntimeStateEvent | None:
         if (
-            self._market is None
-            or self._yes_quote is None
+            self._beat_price is None
             or self._no_quote is None
+            or self._yes_quote is None
             or self._crypto_quote is None
             or self._crypto_ohlcv is None
-            or self._beat_price is None
         ):
             return None
         return RuntimeStateEvent(
