@@ -29,5 +29,10 @@ class Market(ABC):
 
     @classmethod
     @abstractmethod
-    def current(cls) -> Self:
+    def curr_market(cls) -> Self:
+        raise NotImplementedError
+
+    @classmethod
+    @abstractmethod
+    def next_market(cls) -> Self:
         raise NotImplementedError

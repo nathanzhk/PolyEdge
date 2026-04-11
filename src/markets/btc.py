@@ -18,9 +18,14 @@ class _BTCMarket(Market):
     window_func: ClassVar[staticmethod[[], tuple[int, int]]]
 
     @classmethod
-    def current(cls) -> Self:
-        start_ts_s, end_ts_s = cls.window_func()
-        return cls._from_window(start_ts_s, end_ts_s)
+    def curr_market(cls) -> Self:
+        start_ts_s, _ = cls.window_func()
+        return cls.from_start_ts(start_ts_s)
+
+    @classmethod
+    def next_market(cls) -> Self:
+        _, curr_end_ts_s = cls.window_func()
+        return cls.from_start_ts(curr_end_ts_s)
 
     @classmethod
     def from_start_ts(cls, start_ts_s: int) -> Self:

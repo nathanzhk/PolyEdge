@@ -6,18 +6,16 @@ import sys
 from pathlib import Path
 
 from app import Runtime
-from markets.base import Market
 from markets.btc import BTC5mMarket
 from strategy.strategy import DefaultStrategy
 from utils.env import Env
 from utils.logger import configure_logging, get_logger, set_log_file
-from utils.time import now_ts_s, sleep_until
+from utils.time import sleep_until
 
 logger = get_logger("MAIN")
 
 _DEFAULT_PREWARM_S = 5
 _DEFAULT_SHUTDOWN_S = 5
-_LOAD_RETRY_DELAY_S = 1
 
 
 def _parse_args() -> argparse.Namespace:
@@ -66,7 +64,7 @@ async def run(args: argparse.Namespace) -> None:
 
 async def run_worker(market_start_ts: int | None, *, worker_grace_s: int) -> None:
     market = (
-        BTC5mMarket.current()
+        BTC5mMarket.curr_market()
         if market_start_ts is None
         else BTC5mMarket.from_start_ts(market_start_ts)
     )
@@ -113,34 +111,21 @@ async def run_supervisor(*, prewarm_s: int, worker_grace_s: int) -> None:
         while True:
             await _cleanup_workers(running)
 
-            curr_market = BTC5mMarket.current()
+            curr_market = BTC5mMarket.curr_market()
             await _ensure_worker(running, curr_market, worker_grace_s=worker_grace_s)
 
-            next_start_ts_s = curr_market.end_ts_s
-            await sleep_until(next_start_ts_s - prewarm_s)
-
-            next_market = await _load_market_by_start(next_start_ts_s, worker_grace_s)
+            next_market = BTC5mMarket.next_market()
+            await sleep_until(next_market.start_ts_s - prewarm_s)
             await _ensure_worker(running, next_market, worker_grace_s=worker_grace_s)
 
-            await sleep_until(next_start_ts_s)
+            await sleep_until(next_market.start_ts_s)
     finally:
         await _terminate_workers(running)
 
 
-async def _load_market_by_start(start_ts_s: int, worker_grace_s: int) -> Market:
-    while True:
-        try:
-            return BTC5mMarket.from_start_ts(start_ts_s)
-        except ValueError as e:
-            if now_ts_s() > start_ts_s + worker_grace_s:
-                raise
-            logger.warning("next market not ready yet: %s", e)
-            await asyncio.sleep(_LOAD_RETRY_DELAY_S)
-
-
 async def _ensure_worker(
     running: dict[int, asyncio.subprocess.Process],
-    market: Market,
+    market: BTC5mMarket,
     *,
     worker_grace_s: int,
 ) -> None:
