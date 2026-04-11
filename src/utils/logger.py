@@ -121,9 +121,7 @@ def configure_logging() -> None:
     if _CONFIGURED:
         return
 
-    now = datetime.now()
     _FILE_HANDLER = _LogFileHandler()
-    _FILE_HANDLER.set_log_file(_build_log_file("startup", now))
 
     log_queue: queue.Queue[logging.LogRecord] = queue.Queue()
     _QUEUE_HANDLER = _LogQueueHandler(log_queue, _FILE_HANDLER)

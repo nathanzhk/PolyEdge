@@ -14,7 +14,7 @@ from utils.time import sleep_until
 
 logger = get_logger("MAIN")
 
-_DEFAULT_PREWARM_S = 5
+_DEFAULT_PREWARM_S = 20
 _DEFAULT_SHUTDOWN_S = 5
 
 
