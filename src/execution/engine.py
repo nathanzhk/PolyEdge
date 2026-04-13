@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
-from clients.polymarket_clob import TradeClient
 from enums import Side
 from events import DesiredPositionEvent, MarketOrderEvent, MarketTradeEvent
+from execution.clients import TradeClient
 from execution.manager import EventPublisher, ManagedOrder, OrderManager
 from markets.base import Market
 from utils.logger import get_logger
