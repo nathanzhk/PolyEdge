@@ -5,7 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
-from app import Runtime
+from app import ExecutionMode, Runtime
 from markets.btc import BTC5mMarket
 from strategy.strategy import DefaultStrategy
 from utils.env import Env
@@ -44,6 +44,12 @@ def _parse_args() -> argparse.Namespace:
         default=_DEFAULT_SHUTDOWN_S,
         help="seconds after market end before a worker exits",
     )
+    parser.add_argument(
+        "--execution-mode",
+        choices=("live", "paper"),
+        default="live",
+        help="live uses real Polymarket clients; paper uses the local simulator",
+    )
     return parser.parse_args()
 
 
@@ -57,12 +63,25 @@ async def run(args: argparse.Namespace) -> None:
     state_logger.setLevel(logging.INFO)
 
     if args.mode == "worker":
-        await run_worker(args.market_start_ts, worker_grace_s=args.worker_grace_s)
+        await run_worker(
+            args.market_start_ts,
+            worker_grace_s=args.worker_grace_s,
+            execution_mode=args.execution_mode,
+        )
     else:
-        await run_supervisor(prewarm_s=args.prewarm_s, worker_grace_s=args.worker_grace_s)
+        await run_supervisor(
+            prewarm_s=args.prewarm_s,
+            worker_grace_s=args.worker_grace_s,
+            execution_mode=args.execution_mode,
+        )
 
 
-async def run_worker(market_start_ts: int | None, *, worker_grace_s: int) -> None:
+async def run_worker(
+    market_start_ts: int | None,
+    *,
+    worker_grace_s: int,
+    execution_mode: ExecutionMode,
+) -> None:
     market = (
         BTC5mMarket.curr_market()
         if market_start_ts is None
@@ -76,6 +95,7 @@ async def run_worker(market_start_ts: int | None, *, worker_grace_s: int) -> Non
         market=market,
         symbol="BTCUSDT",
         strategy=DefaultStrategy(),
+        execution_mode=execution_mode,
     )
     runtime_task = asyncio.create_task(
         runtime.run(),
@@ -103,7 +123,12 @@ async def run_worker(market_start_ts: int | None, *, worker_grace_s: int) -> Non
     await asyncio.gather(runtime_task, return_exceptions=True)
 
 
-async def run_supervisor(*, prewarm_s: int, worker_grace_s: int) -> None:
+async def run_supervisor(
+    *,
+    prewarm_s: int,
+    worker_grace_s: int,
+    execution_mode: ExecutionMode,
+) -> None:
     set_log_file("supervisor")
     logger.info("start supervisor")
     running: dict[int, asyncio.subprocess.Process] = {}
@@ -112,11 +137,21 @@ async def run_supervisor(*, prewarm_s: int, worker_grace_s: int) -> None:
             await _cleanup_workers(running)
 
             curr_market = BTC5mMarket.curr_market()
-            await _ensure_worker(running, curr_market, worker_grace_s=worker_grace_s)
+            await _ensure_worker(
+                running,
+                curr_market,
+                worker_grace_s=worker_grace_s,
+                execution_mode=execution_mode,
+            )
 
             next_market = BTC5mMarket.next_market()
             await sleep_until(next_market.start_ts_s - prewarm_s)
-            await _ensure_worker(running, next_market, worker_grace_s=worker_grace_s)
+            await _ensure_worker(
+                running,
+                next_market,
+                worker_grace_s=worker_grace_s,
+                execution_mode=execution_mode,
+            )
 
             await sleep_until(next_market.start_ts_s)
     finally:
@@ -128,6 +163,7 @@ async def _ensure_worker(
     market: BTC5mMarket,
     *,
     worker_grace_s: int,
+    execution_mode: ExecutionMode,
 ) -> None:
     proc = running.get(market.start_ts_s)
     if proc is not None and proc.returncode is None:
@@ -142,6 +178,8 @@ async def _ensure_worker(
         str(market.start_ts_s),
         "--worker-grace-s",
         str(worker_grace_s),
+        "--execution-mode",
+        execution_mode,
     ]
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=Path(__file__).resolve().parents[1])
     running[market.start_ts_s] = proc
