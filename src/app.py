@@ -38,6 +38,7 @@ from streams import (
     market_quote_component,
     market_trade_component,
 )
+from web import web_component
 
 ExecutionMode = Literal["live", "paper"]
 
@@ -124,6 +125,7 @@ class Runtime:
         self._register_component(crypto_quote_component())
         self._register_component(crypto_ohlcv_component())
         self._register_component(runtime_state_component())
+        self._register_component(web_component())
 
     def _register_component(self, factory: ComponentFactory) -> None:
         self._component_factories.append(factory)
