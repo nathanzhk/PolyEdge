@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolyEdge Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+    --red: #f85149; --blue: #58a6ff; --yellow: #d29922;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; background: var(--bg); color: var(--text); font-size: 13px; padding: 16px; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .header h1 { font-size: 16px; font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.off { background: var(--red); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 10px; }
+  .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .label { color: var(--muted); }
+  .val { font-weight: 500; text-align: right; }
+  .up { color: var(--green); }
+  .dn { color: var(--red); }
+  .neutral { color: var(--muted); }
+  .side-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+  .side-badge.UP { background: rgba(63,185,80,0.15); color: var(--green); }
+  .side-badge.DOWN { background: rgba(248,81,73,0.15); color: var(--red); }
+  .side-badge.NONE { background: rgba(139,148,158,0.15); color: var(--muted); }
+  .timer { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .timer-row { display: flex; gap: 24px; align-items: baseline; }
+  .timer-label { font-size: 11px; color: var(--muted); }
+  .full-width { grid-column: 1 / -1; }
+  .pnl-row { display: flex; gap: 24px; }
+  .pnl-block { flex: 1; }
+  .pnl-block h3 { font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .latency { color: var(--muted); font-size: 11px; }
+  #events-log { max-height: 120px; overflow-y: auto; font-size: 11px; color: var(--muted); line-height: 1.6; }
+  #events-log div { border-bottom: 1px solid var(--border); padding: 2px 0; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>PolyEdge Dashboard</h1>
+  <div class="status">
+    <span class="latency" id="latency">--</span>
+    <div class="dot off" id="ws-dot"></div>
+    <span id="ws-status" style="color:var(--muted); font-size:12px;">Disconnected</span>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Market Timer -->
+  <div class="card full-width">
+    <div class="card-title" id="market-title">--</div>
+    <div class="timer-row">
+      <div>
+        <div class="timer" id="elapsed">--:--</div>
+        <div class="timer-label">Elapsed</div>
+      </div>
+      <div>
+        <div class="timer" id="remaining">--:--</div>
+        <div class="timer-label">Remaining</div>
+      </div>
+      <div style="margin-left:auto; text-align:right;">
+        <div>
+          <span class="label">Signal: </span>
+          <span class="side-badge NONE" id="signal">--</span>
+        </div>
+        <div style="margin-top:4px;">
+          <span class="label">Prev: </span>
+          <span class="side-badge NONE" id="prev-signal">--</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YES Token -->
+  <div class="card">
+    <div class="card-title">YES (UP)</div>
+    <div class="row"><span class="label">Bid</span><span class="val up" id="yes-bid">--</span></div>
+    <div class="row"><span class="label">Ask</span><span class="val up" id="yes-ask">--</span></div>
+    <div class="row"><span class="label">Mid</span><span class="val" id="yes-mid">--</span></div>
+    <div class="row"><span class="label">Spread</span><span class="val" id="yes-spread">--</span></div>
+  </div>
+
+  <!-- NO Token -->
+  <div class="card">
+    <div class="card-title">NO (DOWN)</div>
+    <div class="row"><span class="label">Bid</span><span class="val dn" id="no-bid">--</span></div>
+    <div class="row"><span class="label">Ask</span><span class="val dn" id="no-ask">--</span></div>
+    <div class="row"><span class="label">Mid</span><span class="val" id="no-mid">--</span></div>
+    <div class="row"><span class="label">Spread</span><span class="val" id="no-spread">--</span></div>
+  </div>
+
+  <!-- BTC -->
+  <div class="card">
+    <div class="card-title">BTC</div>
+    <div class="row"><span class="label">Bid</span><span class="val" id="btc-bid">--</span></div>
+    <div class="row"><span class="label">Ask</span><span class="val" id="btc-ask">--</span></div>
+    <div class="row"><span class="label">Mid</span><span class="val" id="btc-mid">--</span></div>
+    <div class="row"><span class="label">Beat</span><span class="val" id="btc-beat">--</span></div>
+    <div class="row"><span class="label">Diff</span><span class="val" id="btc-diff">--</span></div>
+  </div>
+
+  <!-- OHLCV -->
+  <div class="card">
+    <div class="card-title">BTC OHLCV</div>
+    <div class="row"><span class="label">Open</span><span class="val" id="ohlcv-open">--</span></div>
+    <div class="row"><span class="label">High</span><span class="val up" id="ohlcv-high">--</span></div>
+    <div class="row"><span class="label">Low</span><span class="val dn" id="ohlcv-low">--</span></div>
+    <div class="row"><span class="label">Close</span><span class="val" id="ohlcv-close">--</span></div>
+    <div class="row"><span class="label">Volume</span><span class="val" id="ohlcv-vol">--</span></div>
+  </div>
+
+  <!-- Positions -->
+  <div class="card full-width">
+    <div class="card-title">Positions</div>
+    <div class="pnl-row">
+      <div class="pnl-block">
+        <h3>YES (UP)</h3>
+        <div class="row"><span class="label">Holding</span><span class="val" id="yes-hold">--</span></div>
+        <div class="row"><span class="label">Avg Price</span><span class="val" id="yes-avg">--</span></div>
+        <div class="row"><span class="label">Opening</span><span class="val" id="yes-opening">--</span></div>
+        <div class="row"><span class="label">Closing</span><span class="val" id="yes-closing">--</span></div>
+        <div class="row"><span class="label">Unrealized</span><span class="val" id="yes-unreal">--</span></div>
+        <div class="row"><span class="label">Realized PnL</span><span class="val" id="yes-pnl">--</span></div>
+      </div>
+      <div class="pnl-block">
+        <h3>NO (DOWN)</h3>
+        <div class="row"><span class="label">Holding</span><span class="val" id="no-hold">--</span></div>
+        <div class="row"><span class="label">Avg Price</span><span class="val" id="no-avg">--</span></div>
+        <div class="row"><span class="label">Opening</span><span class="val" id="no-opening">--</span></div>
+        <div class="row"><span class="label">Closing</span><span class="val" id="no-closing">--</span></div>
+        <div class="row"><span class="label">Unrealized</span><span class="val" id="no-unreal">--</span></div>
+        <div class="row"><span class="label">Realized PnL</span><span class="val" id="no-pnl">--</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="card full-width">
+    <div class="card-title">Event Log</div>
+    <div id="events-log"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let ws, marketState = null, reconnectDelay = 1000;
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    $('ws-dot').className = 'dot on';
+    $('ws-status').textContent = 'Connected';
+    reconnectDelay = 1000;
+  };
+
+  ws.onclose = () => {
+    $('ws-dot').className = 'dot off';
+    $('ws-status').textContent = 'Reconnecting...';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  };
+
+  ws.onmessage = (e) => {
+    const d = JSON.parse(new TextDecoder().decode(e.data));
+    marketState = d;
+    render(d);
+  };
+}
+
+function fmt(v, dec = 2) { return v != null ? v.toFixed(dec) : '--'; }
+function fmtUsd(v) { return v != null ? '$' + Math.abs(v).toFixed(2) : '--'; }
+
+function signedUsd(v) {
+  if (v == null) return '--';
+  const cls = v >= 0 ? 'up' : 'dn';
+  const sign = v >= 0 ? '+' : '-';
+  return `<span class="${cls}">${sign}$${Math.abs(v).toFixed(2)}</span>`;
+}
+
+function fmtDuration(s) {
+  if (s < 0) s = 0;
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function render(d) {
+  const nowS = Date.now() / 1000;
+  const latencyMs = Date.now() - d.event_ts_ms;
+  $('latency').textContent = latencyMs + 'ms';
+
+  // Market
+  $('market-title').textContent = d.market.title;
+  $('elapsed').textContent = fmtDuration(nowS - d.market.start_ts_s);
+  $('remaining').textContent = fmtDuration(d.market.end_ts_s - nowS);
+
+  // Signal
+  setSideBadge('signal', d.curr_side);
+  setSideBadge('prev-signal', d.prev_side);
+
+  // YES quote
+  $('yes-bid').textContent = fmt(d.yes_quote.best_bid);
+  $('yes-ask').textContent = fmt(d.yes_quote.best_ask);
+  $('yes-mid').textContent = fmt(d.yes_quote.mid, 3);
+  $('yes-spread').textContent = fmt(d.yes_quote.spread, 3);
+
+  // NO quote
+  $('no-bid').textContent = fmt(d.no_quote.best_bid);
+  $('no-ask').textContent = fmt(d.no_quote.best_ask);
+  $('no-mid').textContent = fmt(d.no_quote.mid, 3);
+  $('no-spread').textContent = fmt(d.no_quote.spread, 3);
+
+  // BTC
+  $('btc-bid').textContent = fmt(d.crypto.best_bid);
+  $('btc-ask').textContent = fmt(d.crypto.best_ask);
+  $('btc-mid').textContent = fmt(d.crypto.mid);
+  $('btc-beat').textContent = fmt(d.beat_price);
+  const diffEl = $('btc-diff');
+  diffEl.innerHTML = signedUsd(d.btc_diff);
+
+  // OHLCV
+  $('ohlcv-open').textContent = fmt(d.ohlcv.open);
+  $('ohlcv-high').textContent = fmt(d.ohlcv.high);
+  $('ohlcv-low').textContent = fmt(d.ohlcv.low);
+  $('ohlcv-close').textContent = fmt(d.ohlcv.close);
+  $('ohlcv-vol').textContent = fmt(d.ohlcv.volume, 4);
+
+  // Positions
+  renderPosition('yes', d.yes_position, d.yes_quote.best_bid);
+  renderPosition('no', d.no_position, d.no_quote.best_bid);
+
+  // Log
+  addLog(d);
+}
+
+function renderPosition(prefix, pos, bid) {
+  if (!pos) {
+    ['-hold', '-avg', '-opening', '-closing', '-unreal', '-pnl'].forEach(s => $(prefix + s).textContent = '--');
+    return;
+  }
+  $(prefix + '-hold').textContent = fmt(pos.holding_shares, 4);
+  $(prefix + '-avg').textContent = fmt(pos.holding_avg_price);
+  $(prefix + '-opening').textContent = fmt(pos.opening_shares, 4);
+  $(prefix + '-closing').textContent = fmt(pos.closing_shares, 4);
+  const unreal = pos.holding_shares * bid - pos.holding_cost;
+  $(prefix + '-unreal').innerHTML = signedUsd(unreal);
+  $(prefix + '-pnl').innerHTML = signedUsd(pos.realized_pnl);
+}
+
+function setSideBadge(id, side) {
+  const el = $(id);
+  el.textContent = side || '--';
+  el.className = 'side-badge ' + (side || 'NONE');
+}
+
+const MAX_LOG = 50;
+function addLog(d) {
+  const log = $('events-log');
+  const time = new Date(d.event_ts_ms).toLocaleTimeString('en-US', {hour12: false, fractionalSecondDigits: 3});
+  const entry = document.createElement('div');
+  entry.textContent = `${time} [${d.reason}] YES ${fmt(d.yes_quote.mid,3)} | NO ${fmt(d.no_quote.mid,3)} | BTC ${fmt(d.crypto.mid)} (${d.btc_diff >= 0 ? '+' : ''}${fmt(d.btc_diff)})`;
+  log.prepend(entry);
+  while (log.children.length > MAX_LOG) log.lastChild.remove();
+}
+
+// Update timers every second
+setInterval(() => {
+  if (!marketState) return;
+  const nowS = Date.now() / 1000;
+  $('elapsed').textContent = fmtDuration(nowS - marketState.market.start_ts_s);
+  $('remaining').textContent = fmtDuration(marketState.market.end_ts_s - nowS);
+}, 1000);
+
+connect();
+</script>
+</body>
+</html>
