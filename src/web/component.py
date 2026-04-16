@@ -47,7 +47,12 @@ class WebComponent:
         )
         server = uvicorn.Server(config)
         logger.info("dashboard http://localhost:%d", self._port)
-        await server.serve()
+        try:
+            await server.serve()
+        except SystemExit:
+            logger.warning("port %d already in use; dashboard disabled for this worker", self._port)
+        except OSError as exc:
+            logger.warning("dashboard failed to start: %s", exc)
 
 
 def web_component() -> ComponentFactory:
