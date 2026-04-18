@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import errno
+import socket
 from typing import TYPE_CHECKING
 
 import uvicorn
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
 logger = get_logger("WEB")
 
 _DEFAULT_PORT = 8177
+_HOST = "0.0.0.0"
 
 
 class WebComponent:
@@ -41,18 +44,39 @@ class WebComponent:
     async def _serve(self) -> None:
         config = uvicorn.Config(
             app,
-            host="0.0.0.0",
+            host=_HOST,
             port=self._port,
             log_level="warning",
+            lifespan="off",
         )
         while True:
-            server = uvicorn.Server(config)
-            try:
-                await server.serve()
-                return
-            except (SystemExit, OSError):
+            sock = self._bind_socket()
+            if sock is None:
                 logger.info("port %d in use, retrying in 2s", self._port)
                 await asyncio.sleep(2)
+                continue
+
+            try:
+                server = uvicorn.Server(config)
+                await server.serve(sockets=[sock])
+                return
+            finally:
+                if sock.fileno() != -1:
+                    sock.close()
+
+    def _bind_socket(self) -> socket.socket | None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((_HOST, self._port))
+            sock.listen()
+            sock.setblocking(False)
+            return sock
+        except OSError as exc:
+            sock.close()
+            if exc.errno == errno.EADDRINUSE:
+                return None
+            raise
 
 
 def web_component() -> ComponentFactory:

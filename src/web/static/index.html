@@ -103,8 +103,8 @@
     <div class="row"><span class="label">Bid</span><span class="val" id="btc-bid">--</span></div>
     <div class="row"><span class="label">Ask</span><span class="val" id="btc-ask">--</span></div>
     <div class="row"><span class="label">Mid</span><span class="val" id="btc-mid">--</span></div>
-    <div class="row"><span class="label">Beat</span><span class="val" id="btc-beat">--</span></div>
-    <div class="row"><span class="label">Diff</span><span class="val" id="btc-diff">--</span></div>
+    <div class="row"><span class="label">Baseline</span><span class="val" id="btc-baseline">--</span></div>
+    <div class="row"><span class="label">Change</span><span class="val" id="btc-change">--</span></div>
   </div>
 
   <!-- OHLCV -->
@@ -224,9 +224,9 @@ function render(d) {
   $('btc-bid').textContent = fmt(d.crypto.best_bid);
   $('btc-ask').textContent = fmt(d.crypto.best_ask);
   $('btc-mid').textContent = fmt(d.crypto.mid);
-  $('btc-beat').textContent = fmt(d.beat_price);
-  const diffEl = $('btc-diff');
-  diffEl.innerHTML = signedUsd(d.btc_diff);
+  $('btc-baseline').textContent = fmt(d.crypto.baseline);
+  const changeEl = $('btc-change');
+  changeEl.innerHTML = signedUsd(d.crypto.change);
 
   // OHLCV
   $('ohlcv-open').textContent = fmt(d.ohlcv.open);
@@ -268,7 +268,9 @@ function addLog(d) {
   const log = $('events-log');
   const time = new Date(d.event_ts_ms).toLocaleTimeString('en-US', {hour12: false, fractionalSecondDigits: 3});
   const entry = document.createElement('div');
-  entry.textContent = `${time} [${d.reason}] YES ${fmt(d.yes_quote.mid,3)} | NO ${fmt(d.no_quote.mid,3)} | BTC ${fmt(d.crypto.mid)} (${d.btc_diff >= 0 ? '+' : ''}${fmt(d.btc_diff)})`;
+  const change = d.crypto.change;
+  const changeText = change == null ? '--' : `${change >= 0 ? '+' : ''}${fmt(change)}`;
+  entry.textContent = `${time} [${d.reason}] YES ${fmt(d.yes_quote.mid,3)} | NO ${fmt(d.no_quote.mid,3)} | BTC ${fmt(d.crypto.mid)} (${changeText})`;
   log.prepend(entry);
   while (log.children.length > MAX_LOG) log.lastChild.remove();
 }

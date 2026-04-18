@@ -30,7 +30,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     try:
         while True:
             await ws.receive_text()
-    except WebSocketDisconnect:
+    except (asyncio.CancelledError, WebSocketDisconnect):
         pass
     finally:
         _clients.discard(ws)
@@ -76,6 +76,9 @@ def _serialize_state(event: RuntimeStateEvent) -> dict[str, Any]:
         "no_quote": _serialize_quote(event.no_token_quote),
         "crypto": {
             "symbol": event.crypto_quote.symbol,
+            "baseline": event.crypto_quote.baseline,
+            "change": event.crypto_quote.change,
+            "price": event.crypto_quote.price,
             "best_bid": event.crypto_quote.best_bid,
             "best_ask": event.crypto_quote.best_ask,
             "mid": event.crypto_quote.mid,
@@ -87,8 +90,6 @@ def _serialize_state(event: RuntimeStateEvent) -> dict[str, Any]:
             "close": event.crypto_ohlcv.close,
             "volume": event.crypto_ohlcv.volume,
         },
-        "beat_price": event.beat_price,
-        "btc_diff": round(event.crypto_quote.mid - event.beat_price, 3),
         "prev_side": event.prev_side,
         "curr_side": event.curr_side,
         "yes_position": _serialize_position(event.yes_token_position),
