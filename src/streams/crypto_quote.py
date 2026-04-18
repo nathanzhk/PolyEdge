@@ -8,12 +8,12 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
 from events import CryptoQuoteEvent
-from utils.env import Env
 from utils.logger import get_logger
 from utils.time import now_ts_ms
 
 _BUCKET_INTERVAL_MS = 5
 _RECONNECT_DELAY_S = 2
+_LOCAL_QUOTE_WS_URL = "ws://127.0.0.1:8080/ws"
 
 logger = get_logger("CRYPTO QUOTE")
 
@@ -23,7 +23,7 @@ class CryptoQuoteStream:
         if symbol is None or symbol.strip() == "":
             raise ValueError("cannot load current symbol")
         self._symbol = symbol.strip().lower()
-        self._ws_url = f"{Env.BINANCE_WS_BASE_URL}/{self._symbol}@bookTicker"
+        self._ws_url = _LOCAL_QUOTE_WS_URL
         self._next_bucket_ts_ms = 0
 
     def __aiter__(self) -> AsyncIterator[CryptoQuoteEvent]:
@@ -63,19 +63,14 @@ class CryptoQuoteStream:
 
     def _build_event(self, message: dict) -> CryptoQuoteEvent | None:
         try:
-            ud_id = int(message["u"])
-            symbol = str(message["s"]).lower()
-            best_bid = float(message["b"])
-            best_ask = float(message["a"])
+            ts_ms = int(float(message["timestamp"]))
+            price = float(message["prices"]["combined"])
         except Exception:
             return None
 
-        if symbol != self._symbol:
-            return None
-
         return CryptoQuoteEvent(
-            exch_ut_id=ud_id,
-            symbol=symbol,
-            best_bid=round(best_bid, 3),
-            best_ask=round(best_ask, 3),
+            exch_ts_ms=ts_ms,
+            symbol=self._symbol,
+            best_bid=round(price, 3),
+            best_ask=round(price, 3),
         )

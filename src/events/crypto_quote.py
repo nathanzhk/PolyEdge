@@ -6,7 +6,7 @@ from utils.time import now_ts_ms
 
 @dataclass(slots=True, frozen=True)
 class CryptoQuoteEvent:
-    exch_ut_id: int
+    exch_ts_ms: int
     symbol: str
     best_bid: float
     best_ask: float
