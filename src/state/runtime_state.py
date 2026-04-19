@@ -17,8 +17,6 @@ from utils.time import elapsed_ms_since, fmt_duration_s, now_ts_s
 
 logger = get_logger("STATE")
 
-_MAX_BEAT_OFFSET_MS = 200
-
 Side = Literal["UP", "DOWN"] | None
 
 
@@ -33,13 +31,15 @@ class Indicators:
         self,
         yes_mid: float,
         no_mid: float,
-        btc_diff: float,
+        btc_change: float | None,
     ) -> None:
         self.prev_side = self.curr_side
 
-        if yes_mid > no_mid and btc_diff > 0:
+        if btc_change is None:
+            self.curr_side = None
+        elif yes_mid > no_mid and btc_change > 0:
             self.curr_side = "UP"
-        elif no_mid > yes_mid and btc_diff < 0:
+        elif no_mid > yes_mid and btc_change < 0:
             self.curr_side = "DOWN"
         else:
             self.curr_side = None
@@ -65,9 +65,6 @@ class RuntimeState:
 
         self._crypto_quote: CryptoQuoteEvent | None = None
         self._crypto_ohlcv: CryptoOHLCVEvent | None = None
-
-        self._beat_price: float | None = None
-        self._beat_offset_ms: int | None = None
 
         self._yes_position: CurrentPositionEvent | None = None
         self._no_position: CurrentPositionEvent | None = None
@@ -100,18 +97,15 @@ class RuntimeState:
     ) -> RuntimeStateEvent | None:
         async with self._lock:
             self._crypto_quote = quote
-            self._record_beat_price(quote)
             state_event = self._event_if_changed("crypto_quote")
-            beat_price = self._beat_price
-        if beat_price is not None:
-            logger.debug(
-                "latency=%.2fms symbol=%s best_bid=%.2f best_ask=%.2f diff=%+.2f",
-                elapsed_ms_since(quote.recv_mono_ns),
-                quote.symbol,
-                quote.best_bid,
-                quote.best_ask,
-                quote.mid - beat_price,
-            )
+        logger.debug(
+            "latency=%.2fms symbol=%s price=%.2f baseline=%s change=%s",
+            elapsed_ms_since(quote.recv_mono_ns),
+            quote.symbol,
+            quote.mid,
+            _fmt_optional_usd(quote.baseline),
+            _fmt_optional_signed_usd(quote.change),
+        )
         return state_event
 
     async def update_crypto_ohlcv(
@@ -145,16 +139,6 @@ class RuntimeState:
                 self._no_position = position
             return self._event_if_changed("current_position")
 
-    def _record_beat_price(self, quote: CryptoQuoteEvent) -> None:
-        beat_offset_ms = quote.recv_ts_ms - self._market.start_ts_ms
-        beat_offset_abs_ms = abs(beat_offset_ms)
-        if beat_offset_abs_ms > _MAX_BEAT_OFFSET_MS:
-            return
-        if self._beat_offset_ms is None or beat_offset_abs_ms < abs(self._beat_offset_ms):
-            self._beat_price = quote.mid
-            self._beat_offset_ms = beat_offset_ms
-            logger.info("beat=%.2f offset=%dms", self._beat_price, beat_offset_ms)
-
     def _event_if_changed(self, reason: str) -> RuntimeStateEvent | None:
         event = self._build_event(reason)
         if event is None:
@@ -166,7 +150,7 @@ class RuntimeState:
         self.indicators.update(
             yes_mid=event.yes_token_quote.mid,
             no_mid=event.no_token_quote.mid,
-            btc_diff=event.crypto_quote.mid - event.beat_price,
+            btc_change=event.crypto_quote.change,
         )
         event = dataclasses.replace(
             event,
@@ -178,8 +162,7 @@ class RuntimeState:
 
     def _build_event(self, reason: str) -> RuntimeStateEvent | None:
         if (
-            self._beat_price is None
-            or self._no_quote is None
+            self._no_quote is None
             or self._yes_quote is None
             or self._crypto_quote is None
             or self._crypto_ohlcv is None
@@ -192,7 +175,6 @@ class RuntimeState:
             no_token_quote=self._no_quote,
             crypto_quote=self._crypto_quote,
             crypto_ohlcv=self._crypto_ohlcv,
-            beat_price=self._beat_price,
             yes_token_position=self._yes_position,
             no_token_position=self._no_position,
         )
@@ -212,12 +194,14 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
         (
             event.crypto_quote.best_bid,
             event.crypto_quote.best_ask,
+            event.crypto_quote.baseline,
+            event.crypto_quote.change,
+            event.crypto_quote.price,
         ),
         (
             event.crypto_ohlcv.start_ts_ms,
             event.crypto_ohlcv.close_ts_ms,
         ),
-        event.beat_price,
         (
             event.yes_token_position.opening_shares,
             event.yes_token_position.holding_shares,
@@ -256,7 +240,7 @@ def _log_event(event: RuntimeStateEvent) -> None:
         event.no_token_quote.best_bid,
         event.no_token_quote.best_ask,
         event.crypto_quote.mid,
-        _fmt_signed_usd(event.crypto_quote.mid - event.beat_price),
+        _fmt_optional_signed_usd(event.crypto_quote.change),
     )
     logger.info(
         "UP | open %.6f | open settling %.6f | close %.6f | close settling %.6f",
@@ -296,3 +280,15 @@ def _log_event(event: RuntimeStateEvent) -> None:
 
 def _fmt_signed_usd(value: float) -> str:
     return f"{'△ +' if value >= 0 else '▽ -'}${abs(value):.2f}"
+
+
+def _fmt_optional_usd(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return f"${value:.2f}"
+
+
+def _fmt_optional_signed_usd(value: float | None) -> str:
+    if value is None:
+        return "--"
+    return _fmt_signed_usd(value)

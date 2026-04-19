@@ -42,9 +42,7 @@ class SupermanStrategy:
         no_quote = state.no_token_quote
         market = state.market
 
-        btc_base = state.beat_price
-        btc_curr = state.crypto_quote.mid
-        btc_diff = btc_curr - btc_base
+        btc_diff = state.crypto_quote.change
 
         elapsed_s = _elapsed_s(market, now_ts_ms())
 
@@ -61,7 +59,7 @@ class SupermanStrategy:
                 market,
                 yes_quote,
                 no_quote,
-                btc_diff,
+                btc_diff or 0.0,
                 elapsed_s,
             )
         if active_position is not None:
@@ -70,7 +68,7 @@ class SupermanStrategy:
                     market,
                     yes_quote,
                     no_quote,
-                    btc_diff,
+                    btc_diff or 0.0,
                     active_position,
                     elapsed_s,
                 )

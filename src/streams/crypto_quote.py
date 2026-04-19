@@ -64,7 +64,7 @@ class CryptoQuoteStream:
     def _build_event(self, message: dict) -> CryptoQuoteEvent | None:
         try:
             ts_ms = int(float(message["timestamp"]))
-            price = float(message["prices"]["combined"])
+            price = float(message["price"])
         except Exception:
             return None
 
@@ -73,4 +73,16 @@ class CryptoQuoteStream:
             symbol=self._symbol,
             best_bid=round(price, 3),
             best_ask=round(price, 3),
+            baseline=_optional_float(message.get("baseline")),
+            change=_optional_float(message.get("change")),
+            price=price,
         )
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
