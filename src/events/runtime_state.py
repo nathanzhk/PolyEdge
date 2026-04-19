@@ -22,7 +22,6 @@ class RuntimeStateEvent:
     no_token_quote: MarketQuoteEvent
     crypto_quote: CryptoQuoteEvent
     crypto_ohlcv: CryptoOHLCVEvent
-    beat_price: float
     yes_token_position: CurrentPositionEvent | None
     no_token_position: CurrentPositionEvent | None
     prev_side: Side = None
