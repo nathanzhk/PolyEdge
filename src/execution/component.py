@@ -40,8 +40,8 @@ class ExecutionComponent:
         desired_position_events = self._bus.subscribe(
             DesiredPositionEvent,
             name="execution-engine.desired-position",
-            maxsize=1,
-            overflow=OverflowPolicy.DROP_OLDEST,
+            maxsize=20,
+            overflow=OverflowPolicy.BLOCK,
         )
         tasks.create_task(self._desired_position_loop(desired_position_events))
 

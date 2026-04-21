@@ -13,6 +13,26 @@ from utils.time import fmt_ts_s
 
 _LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
+_MARKET_LOGGER_NAMES = frozenset(
+    {
+        "STATE",
+        "MARKET QUOTE",
+        "MARKET TRADE",
+        "CRYPTO QUOTE",
+        "CRYPTO OHLCV",
+    }
+)
+_TRADE_LOGGER_NAMES = frozenset(
+    {
+        "TRADE",
+        "MANAGER",
+        "MAKER",
+        "TAKER",
+        "PAPER",
+        "PAPER-MAKER",
+        "PAPER-TAKER",
+    }
+)
 
 _COLOR_RESET = "\033[0m"
 _LEVEL_COLORS = {
@@ -40,7 +60,7 @@ class _LogQueueHandler(QueueHandler):
 
     def prepare(self, record: logging.LogRecord) -> logging.LogRecord:
         record = super().prepare(record)
-        record.log_file = self._file_handler.log_file
+        record.base_log_file = self._file_handler.log_file
         return record
 
 
@@ -48,19 +68,20 @@ class _LogFileHandler(logging.Handler):
     def __init__(self) -> None:
         super().__init__(logging.DEBUG)
         self._lock = RLock()
-        self._handler: logging.FileHandler | None = None
-        self._active_log_file: Path | None = None
+        self._handlers: dict[Path, logging.FileHandler] = {}
         self._target_log_file: Path | None = None
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            log_file = getattr(record, "log_file", None)
+            base_log_file = getattr(record, "base_log_file", None)
+            if base_log_file is None:
+                return
+            log_file = _route_log_file(base_log_file, record.name)
             with self._lock:
-                if log_file is not None and log_file != self._active_log_file:
-                    self._open_log_file(log_file)
-                if self._handler is None:
-                    return
-                self._handler.emit(record)
+                handler = self._handlers.get(log_file)
+                if handler is None:
+                    handler = self._open_log_file(log_file)
+                handler.emit(record)
         except Exception:
             self.handleError(record)
 
@@ -72,32 +93,37 @@ class _LogFileHandler(logging.Handler):
     def set_log_file(self, log_file: Path) -> None:
         with self._lock:
             log_file.parent.mkdir(parents=True, exist_ok=True)
+            if log_file != self._target_log_file:
+                self._close_handlers()
             self._target_log_file = log_file
-            if self._handler is None:
-                self._open_log_file(log_file)
+            self._open_log_file(log_file)
 
-    def _open_log_file(self, log_file: Path) -> None:
+    def _open_log_file(self, log_file: Path) -> logging.FileHandler:
         log_file.parent.mkdir(parents=True, exist_ok=True)
+        existing_handler = self._handlers.get(log_file)
+        if existing_handler is not None:
+            return existing_handler
+
         next_handler = logging.FileHandler(log_file)
         next_handler.setFormatter(_Formatter(_LOG_FORMAT))
         next_handler.setLevel(logging.DEBUG)
-
-        prev_handler = self._handler
-        self._handler = next_handler
-        self._active_log_file = log_file
-
-        if prev_handler is not None:
-            prev_handler.close()
+        self._handlers[log_file] = next_handler
+        return next_handler
 
     def close(self) -> None:
         with self._lock:
-            handler = self._handler
-            self._handler = None
-            self._active_log_file = None
+            handlers = list(self._handlers.values())
+            self._handlers.clear()
             self._target_log_file = None
-        if handler is not None:
+        for handler in handlers:
             handler.close()
         super().close()
+
+    def _close_handlers(self) -> None:
+        handlers = list(self._handlers.values())
+        self._handlers.clear()
+        for handler in handlers:
+            handler.close()
 
 
 class _Formatter(logging.Formatter):
@@ -184,6 +210,14 @@ def _stop_queue_listener() -> None:
 def _build_log_file(name: str, ts: datetime) -> Path:
     safe_name = _sanitize_log_name(name)
     return _LOG_DIR / ts.strftime("%Y%m%d") / f"{ts.strftime('%Y%m%d_%H%M%S')}-{safe_name}.log"
+
+
+def _route_log_file(base_log_file: Path, logger_name: str) -> Path:
+    if logger_name in _MARKET_LOGGER_NAMES:
+        return base_log_file.with_suffix(".market.log")
+    if logger_name in _TRADE_LOGGER_NAMES:
+        return base_log_file.with_suffix(".trade.log")
+    return base_log_file
 
 
 def _sanitize_log_name(name: str) -> str:
