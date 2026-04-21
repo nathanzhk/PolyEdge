@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app import ExecutionMode, Runtime
 from markets.btc import BTC5mMarket
+from strategies.production.dual_buy import DualBuyStrategy
 from strategy.strategy import DefaultStrategy
 from utils.env import Env
 from utils.logger import configure_logging, get_logger, set_log_file
@@ -50,6 +51,12 @@ def _parse_args() -> argparse.Namespace:
         default="live",
         help="live uses real Polymarket clients; paper uses the local simulator",
     )
+    parser.add_argument(
+        "--strategy",
+        choices=("none", "dual-buy"),
+        default="none",
+        help="strategy to run; none only observes market data",
+    )
     return parser.parse_args()
 
 
@@ -67,12 +74,14 @@ async def run(args: argparse.Namespace) -> None:
             args.market_start_ts,
             worker_grace_s=args.worker_grace_s,
             execution_mode=args.execution_mode,
+            strategy_name=args.strategy,
         )
     else:
         await run_supervisor(
             prewarm_s=args.prewarm_s,
             worker_grace_s=args.worker_grace_s,
             execution_mode=args.execution_mode,
+            strategy_name=args.strategy,
         )
 
 
@@ -81,6 +90,7 @@ async def run_worker(
     *,
     worker_grace_s: int,
     execution_mode: ExecutionMode,
+    strategy_name: str,
 ) -> None:
     market = (
         BTC5mMarket.curr_market()
@@ -90,11 +100,12 @@ async def run_worker(
     set_log_file(market.slug)
     logger.info("start worker for %s", market.slug)
     logger.info("%s", market.title)
+    logger.info("strategy=%s execution_mode=%s", strategy_name, execution_mode)
 
     runtime = Runtime(
         market=market,
         symbol="BTCUSDT",
-        strategy=DefaultStrategy(),
+        strategy=_build_strategy(strategy_name),
         execution_mode=execution_mode,
     )
     runtime_task = asyncio.create_task(
@@ -128,9 +139,11 @@ async def run_supervisor(
     prewarm_s: int,
     worker_grace_s: int,
     execution_mode: ExecutionMode,
+    strategy_name: str,
 ) -> None:
     set_log_file("supervisor")
     logger.info("start supervisor")
+    logger.info("strategy=%s execution_mode=%s", strategy_name, execution_mode)
     running: dict[int, asyncio.subprocess.Process] = {}
     try:
         while True:
@@ -142,6 +155,7 @@ async def run_supervisor(
                 curr_market,
                 worker_grace_s=worker_grace_s,
                 execution_mode=execution_mode,
+                strategy_name=strategy_name,
             )
 
             next_market = BTC5mMarket.next_market()
@@ -151,6 +165,7 @@ async def run_supervisor(
                 next_market,
                 worker_grace_s=worker_grace_s,
                 execution_mode=execution_mode,
+                strategy_name=strategy_name,
             )
 
             await sleep_until(next_market.start_ts_s)
@@ -164,6 +179,7 @@ async def _ensure_worker(
     *,
     worker_grace_s: int,
     execution_mode: ExecutionMode,
+    strategy_name: str,
 ) -> None:
     proc = running.get(market.start_ts_s)
     if proc is not None and proc.returncode is None:
@@ -180,6 +196,8 @@ async def _ensure_worker(
         str(worker_grace_s),
         "--execution-mode",
         execution_mode,
+        "--strategy",
+        strategy_name,
     ]
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=Path(__file__).resolve().parents[1])
     running[market.start_ts_s] = proc
@@ -207,6 +225,12 @@ async def _terminate_workers(running: dict[int, asyncio.subprocess.Process]) -> 
         if proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 await proc.wait()
+
+
+def _build_strategy(strategy_name: str):
+    if strategy_name == "dual-buy":
+        return DualBuyStrategy()
+    return DefaultStrategy()
 
 
 def main() -> None:
