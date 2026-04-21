@@ -22,7 +22,7 @@ class LateReversalStrategy:
         self.config = _Config()
         self._last_market_id: str | None = None
 
-    def evaluate(self, state: RuntimeStateEvent) -> DesiredPositionEvent | None:
+    def evaluate(self, state: RuntimeStateEvent) -> list[DesiredPositionEvent]:
         market = state.market
 
         if market.id != self._last_market_id:
@@ -31,15 +31,15 @@ class LateReversalStrategy:
         remaining_s = _remaining_s(market, now_ts_ms())
 
         if remaining_s > self.config.window_sec or remaining_s <= 0:
-            return None
+            return []
 
         prev_side = state.prev_side
         curr_side = state.curr_side
 
         if prev_side is None or curr_side is None:
-            return None
+            return []
         if prev_side == curr_side:
-            return None
+            return []
 
         # Reversal detected: prev_side != curr_side within last 10 seconds
         logger.info(
@@ -55,14 +55,16 @@ class LateReversalStrategy:
         else:
             token = market.no_token
 
-        return DesiredPositionEvent(
-            market=market,
-            token=token,
-            shares=self.config.entry_shares,
-            best_bid=self.config.max_entry_ask,
-            best_ask=self.config.max_entry_ask,
-            force=True,
-        )
+        return [
+            DesiredPositionEvent(
+                market=market,
+                token=token,
+                shares=self.config.entry_shares,
+                best_bid=self.config.max_entry_ask,
+                best_ask=self.config.max_entry_ask,
+                force=True,
+            )
+        ]
 
 
 def _remaining_s(market: Market, ts_ms: int) -> float:

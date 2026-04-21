@@ -37,7 +37,7 @@ class FlashStrategy:
         self._market_id: str = ""
         self._btc_by_s: dict[int, float] = {}
 
-    def evaluate(self, state: RuntimeStateEvent) -> DesiredPositionEvent | None:
+    def evaluate(self, state: RuntimeStateEvent) -> list[DesiredPositionEvent]:
         yes_quote = state.yes_token_quote
         no_quote = state.no_token_quote
         market = state.market
@@ -61,36 +61,40 @@ class FlashStrategy:
             position = state.no_token_position
 
         if position is not None and elapsed_s >= self.config.force_exit_s:
-            return DesiredPositionEvent(
-                market=market,
-                token=position.token,
-                shares=0.0,
-                best_bid=_bid_for_token(yes_quote, no_quote, position.token),
-                best_ask=_ask_for_token(yes_quote, no_quote, position.token),
-                force=True,
-            )
+            return [
+                DesiredPositionEvent(
+                    market=market,
+                    token=position.token,
+                    shares=0.0,
+                    best_bid=_bid_for_token(yes_quote, no_quote, position.token),
+                    best_ask=_ask_for_token(yes_quote, no_quote, position.token),
+                    force=True,
+                )
+            ]
 
         if elapsed_s < self.config.min_entry_s:
-            return None
+            return []
 
         momentum = self._get_momentum(elapsed_s)
         logger.debug("evaluate momentum %s", momentum)
 
         if position is None:
             if elapsed_s > self.config.max_entry_s:
-                return None
-            return self._no_position(market, yes_quote, no_quote, momentum)
+                return []
+            return _as_targets(self._no_position(market, yes_quote, no_quote, momentum))
 
         if position.opening_shares > 0:
-            return self._opening(market, yes_quote, no_quote, position, momentum)
+            return _as_targets(self._opening(market, yes_quote, no_quote, position, momentum))
 
         if position.closing_shares > 0:
-            return self._closing(market, yes_quote, no_quote, position)
+            return _as_targets(self._closing(market, yes_quote, no_quote, position))
 
         cfg = self.config
         hold_momentum = self._get_momentum(elapsed_s, cfg.hold_lookback_s, cfg.hold_threshold)
         logger.debug("holding momentum %s", hold_momentum)
-        return self._holding(market, yes_quote, no_quote, position, momentum, hold_momentum)
+        return _as_targets(
+            self._holding(market, yes_quote, no_quote, position, momentum, hold_momentum)
+        )
 
     # ------------------------------------------------------------------
     # State handlers
@@ -279,3 +283,9 @@ def _ask_for_token(
     token: Token,
 ) -> float:
     return yes_quote.best_ask if token.id == yes_quote.token.id else no_quote.best_ask
+
+
+def _as_targets(target: DesiredPositionEvent | None) -> list[DesiredPositionEvent]:
+    if target is None:
+        return []
+    return [target]

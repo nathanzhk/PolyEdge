@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from events import DesiredPositionEvent, RuntimeStateEvent
-from strategy.strategy import Strategy
+from events import RuntimeStateEvent
+from strategy.strategy import Strategy, StrategyOutput
 
 
 class StrategyEngine:
     def __init__(self, strategy: Strategy) -> None:
         self._strategy = strategy
 
-    async def evaluate(self, state: RuntimeStateEvent) -> DesiredPositionEvent | None:
+    async def evaluate(self, state: RuntimeStateEvent) -> StrategyOutput:
         return self._strategy.evaluate(state)

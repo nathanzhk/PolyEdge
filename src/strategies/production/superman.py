@@ -37,7 +37,7 @@ class SupermanStrategy:
     def __init__(self) -> None:
         self.config = _Config()
 
-    def evaluate(self, state: RuntimeStateEvent) -> DesiredPositionEvent | None:
+    def evaluate(self, state: RuntimeStateEvent) -> list[DesiredPositionEvent]:
         yes_quote = state.yes_token_quote
         no_quote = state.no_token_quote
         market = state.market
@@ -55,37 +55,46 @@ class SupermanStrategy:
         position_status = self._get_position_status(active_position, elapsed_s)
 
         if position_status == _PositionStatus.OBSERVE:
-            return self._observe(
-                market,
-                yes_quote,
-                no_quote,
-                btc_diff or 0.0,
-                elapsed_s,
-            )
-        if active_position is not None:
-            if position_status == _PositionStatus.OPENING:
-                return self._opening(
+            return _as_targets(
+                self._observe(
                     market,
                     yes_quote,
                     no_quote,
                     btc_diff or 0.0,
-                    active_position,
                     elapsed_s,
                 )
+            )
+        if active_position is not None:
+            if position_status == _PositionStatus.OPENING:
+                return _as_targets(
+                    self._opening(
+                        market,
+                        yes_quote,
+                        no_quote,
+                        btc_diff or 0.0,
+                        active_position,
+                        elapsed_s,
+                    )
+                )
             elif position_status == _PositionStatus.HOLDING:
-                return self._holding(
-                    market,
-                    yes_quote,
-                    no_quote,
-                    active_position,
+                return _as_targets(
+                    self._holding(
+                        market,
+                        yes_quote,
+                        no_quote,
+                        active_position,
+                    )
                 )
             elif position_status == _PositionStatus.CLOSING:
-                return self._closing(
-                    market,
-                    yes_quote,
-                    no_quote,
-                    active_position,
+                return _as_targets(
+                    self._closing(
+                        market,
+                        yes_quote,
+                        no_quote,
+                        active_position,
+                    )
                 )
+        return []
 
     def _observe(
         self,
@@ -274,3 +283,9 @@ def _ask_for_token(
     token: Token,
 ) -> float:
     return yes_quote.best_ask if token.id == yes_quote.token.id else no_quote.best_ask
+
+
+def _as_targets(target: DesiredPositionEvent | None) -> list[DesiredPositionEvent]:
+    if target is None:
+        return []
+    return [target]
