@@ -15,6 +15,11 @@
   .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
   .header h1 { font-size: 16px; font-weight: 600; }
   .status { display: flex; align-items: center; gap: 8px; }
+  .tabs { display: flex; gap: 8px; margin: -4px 0 16px; overflow-x: auto; padding-bottom: 2px; }
+  .tab { appearance: none; border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 6px; padding: 7px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
+  .tab.active { border-color: var(--blue); color: var(--text); background: rgba(88,166,255,0.12); }
+  .tab .tab-title { display: block; font-size: 12px; }
+  .tab .tab-meta { display: block; margin-top: 2px; font-size: 10px; color: var(--muted); }
   .dot { width: 8px; height: 8px; border-radius: 50%; }
   .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .dot.off { background: var(--red); }
@@ -52,6 +57,8 @@
     <span id="ws-status" style="color:var(--muted); font-size:12px;">Disconnected</span>
   </div>
 </div>
+
+<div class="tabs" id="worker-tabs"></div>
 
 <div class="grid">
   <!-- Market Timer -->
@@ -151,7 +158,10 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let ws, marketState = null, reconnectDelay = 1000;
+let ws, reconnectDelay = 1000;
+let activeWorkerId = null;
+const workerStates = new Map();
+const workerLogs = new Map();
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -173,13 +183,53 @@ function connect() {
 
   ws.onmessage = (e) => {
     const d = JSON.parse(new TextDecoder().decode(e.data));
-    marketState = d;
-    render(d);
+    const workerId = getWorkerId(d);
+    workerStates.set(workerId, d);
+    addLog(d);
+    if (!activeWorkerId || !workerStates.has(activeWorkerId)) {
+      activeWorkerId = workerId;
+    }
+    renderTabs();
+    if (workerId === activeWorkerId) render(d);
   };
 }
 
 function fmt(v, dec = 2) { return v != null ? v.toFixed(dec) : '--'; }
 function fmtUsd(v) { return v != null ? '$' + Math.abs(v).toFixed(2) : '--'; }
+function getWorkerId(d) { return d.worker_id || d.market?.slug || 'worker'; }
+
+function workerLabel(d) {
+  const start = d.market?.start_ts_s;
+  if (start == null) return getWorkerId(d);
+  return new Date(start * 1000).toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit', hour12: false});
+}
+
+function renderTabs() {
+  const tabs = $('worker-tabs');
+  tabs.innerHTML = '';
+  const states = [...workerStates.entries()].sort((a, b) => {
+    return (a[1].market?.start_ts_s || 0) - (b[1].market?.start_ts_s || 0);
+  });
+
+  for (const [workerId, state] of states) {
+    const tab = document.createElement('button');
+    const title = document.createElement('span');
+    const meta = document.createElement('span');
+    tab.type = 'button';
+    tab.className = 'tab' + (workerId === activeWorkerId ? ' active' : '');
+    title.className = 'tab-title';
+    title.textContent = workerLabel(state);
+    meta.className = 'tab-meta';
+    meta.textContent = `${state.curr_side || 'NONE'} - ${state.reason}`;
+    tab.append(title, meta);
+    tab.onclick = () => {
+      activeWorkerId = workerId;
+      renderTabs();
+      render(state);
+    };
+    tabs.appendChild(tab);
+  }
+}
 
 function signedUsd(v) {
   if (v == null) return '--';
@@ -240,7 +290,7 @@ function render(d) {
   renderPosition('no', d.no_position, d.no_quote.best_bid);
 
   // Log
-  addLog(d);
+  renderLog(getWorkerId(d));
 }
 
 function renderPosition(prefix, pos, bid) {
@@ -265,18 +315,29 @@ function setSideBadge(id, side) {
 
 const MAX_LOG = 50;
 function addLog(d) {
-  const log = $('events-log');
+  const workerId = getWorkerId(d);
+  const entries = workerLogs.get(workerId) || [];
   const time = new Date(d.event_ts_ms).toLocaleTimeString('en-US', {hour12: false, fractionalSecondDigits: 3});
-  const entry = document.createElement('div');
   const change = d.crypto.change;
   const changeText = change == null ? '--' : `${change >= 0 ? '+' : ''}${fmt(change)}`;
-  entry.textContent = `${time} [${d.reason}] YES ${fmt(d.yes_quote.mid,3)} | NO ${fmt(d.no_quote.mid,3)} | BTC ${fmt(d.crypto.mid)} (${changeText})`;
-  log.prepend(entry);
-  while (log.children.length > MAX_LOG) log.lastChild.remove();
+  entries.unshift(`${time} [${d.reason}] YES ${fmt(d.yes_quote.mid,3)} | NO ${fmt(d.no_quote.mid,3)} | BTC ${fmt(d.crypto.mid)} (${changeText})`);
+  while (entries.length > MAX_LOG) entries.pop();
+  workerLogs.set(workerId, entries);
+}
+
+function renderLog(workerId) {
+  const log = $('events-log');
+  log.innerHTML = '';
+  for (const text of workerLogs.get(workerId) || []) {
+    const entry = document.createElement('div');
+    entry.textContent = text;
+    log.appendChild(entry);
+  }
 }
 
 // Update timers every second
 setInterval(() => {
+  const marketState = workerStates.get(activeWorkerId);
   if (!marketState) return;
   const nowS = Date.now() / 1000;
   $('elapsed').textContent = fmtDuration(nowS - marketState.market.start_ts_s);

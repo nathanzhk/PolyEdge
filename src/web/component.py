@@ -5,12 +5,13 @@ import errno
 import socket
 from typing import TYPE_CHECKING
 
+import requests
 import uvicorn
 
 from event_bus import EventBus, OverflowPolicy, Subscription
 from events import RuntimeStateEvent
 from utils.logger import get_logger
-from web.server import app, broadcast_loop, enqueue_event
+from web.server import app, broadcast_loop, enqueue_event, enqueue_payload, serialize_event
 
 if TYPE_CHECKING:
     from app import ComponentFactory
@@ -33,15 +34,45 @@ class WebComponent:
             maxsize=200,
             overflow=OverflowPolicy.DROP_OLDEST,
         )
-        tasks.create_task(self._event_loop(state_events))
-        tasks.create_task(broadcast_loop())
-        tasks.create_task(self._serve())
+        tasks.create_task(self._run(state_events))
+
+    async def _run(self, events: Subscription[RuntimeStateEvent]) -> None:
+        sock = self._bind_socket()
+        if sock is not None:
+            await self._run_server(events, sock)
+            return
+
+        logger.info("port %d in use; forwarding web state to existing dashboard", self._port)
+        async for event in events:
+            payload = serialize_event(event)
+            if await self._forward_payload(payload):
+                continue
+
+            sock = self._bind_socket()
+            if sock is None:
+                logger.warning("dashboard forward failed; retrying on next state event")
+                continue
+
+            logger.info("dashboard port %d is free; this worker is serving dashboard", self._port)
+            enqueue_payload(payload)
+            await self._run_server(events, sock)
+            return
+
+    async def _run_server(
+        self,
+        events: Subscription[RuntimeStateEvent],
+        sock: socket.socket,
+    ) -> None:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(self._event_loop(events))
+            tasks.create_task(broadcast_loop())
+            tasks.create_task(self._serve(sock))
 
     async def _event_loop(self, events: Subscription[RuntimeStateEvent]) -> None:
         async for event in events:
             enqueue_event(event)
 
-    async def _serve(self) -> None:
+    async def _serve(self, sock: socket.socket) -> None:
         config = uvicorn.Config(
             app,
             host=_HOST,
@@ -49,20 +80,28 @@ class WebComponent:
             log_level="warning",
             lifespan="off",
         )
-        while True:
-            sock = self._bind_socket()
-            if sock is None:
-                logger.info("port %d in use, retrying in 2s", self._port)
-                await asyncio.sleep(2)
-                continue
+        try:
+            server = uvicorn.Server(config)
+            await server.serve(sockets=[sock])
+        finally:
+            if sock.fileno() != -1:
+                sock.close()
 
-            try:
-                server = uvicorn.Server(config)
-                await server.serve(sockets=[sock])
-                return
-            finally:
-                if sock.fileno() != -1:
-                    sock.close()
+    async def _forward_payload(self, payload: bytes) -> bool:
+        try:
+            await asyncio.to_thread(self._post_payload, payload)
+            return True
+        except requests.RequestException:
+            return False
+
+    def _post_payload(self, payload: bytes) -> None:
+        response = requests.post(
+            f"http://127.0.0.1:{self._port}/state",
+            data=payload,
+            headers={"content-type": "application/json"},
+            timeout=1,
+        )
+        response.raise_for_status()
 
     def _bind_socket(self) -> socket.socket | None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

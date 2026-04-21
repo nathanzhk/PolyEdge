@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import orjson
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
 from events import RuntimeStateEvent
@@ -14,6 +14,7 @@ app = FastAPI()
 
 _clients: set[WebSocket] = set()
 _broadcast_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=500)
+_latest_by_worker: dict[str, bytes] = {}
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -28,12 +29,20 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     _clients.add(ws)
     try:
+        for payload in _latest_by_worker.values():
+            await ws.send_bytes(payload)
         while True:
             await ws.receive_text()
     except (asyncio.CancelledError, WebSocketDisconnect):
         pass
     finally:
         _clients.discard(ws)
+
+
+@app.post("/state")
+async def ingest_state(request: Request) -> dict[str, bool]:
+    enqueue_payload(await request.body())
+    return {"ok": True}
 
 
 async def broadcast_loop() -> None:
@@ -50,7 +59,11 @@ async def broadcast_loop() -> None:
 
 
 def enqueue_event(event: RuntimeStateEvent) -> None:
-    payload = orjson.dumps(_serialize_state(event))
+    enqueue_payload(serialize_event(event))
+
+
+def enqueue_payload(payload: bytes) -> None:
+    _remember_latest(payload)
     try:
         _broadcast_queue.put_nowait(payload)
     except asyncio.QueueFull:
@@ -61,8 +74,26 @@ def enqueue_event(event: RuntimeStateEvent) -> None:
         _broadcast_queue.put_nowait(payload)
 
 
+def serialize_event(event: RuntimeStateEvent) -> bytes:
+    return orjson.dumps(_serialize_state(event))
+
+
+def _remember_latest(payload: bytes) -> None:
+    try:
+        state = orjson.loads(payload)
+    except orjson.JSONDecodeError:
+        return
+    worker_id = state.get("worker_id")
+    if not worker_id:
+        market = state.get("market") or {}
+        worker_id = market.get("slug")
+    if worker_id:
+        _latest_by_worker[worker_id] = payload
+
+
 def _serialize_state(event: RuntimeStateEvent) -> dict[str, Any]:
     return {
+        "worker_id": event.market.slug,
         "event_ts_ms": event.event_ts_ms,
         "reason": event.reason,
         "market": {
