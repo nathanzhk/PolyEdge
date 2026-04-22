@@ -115,6 +115,9 @@ class Runtime:
             if self._context.paper_simulator is not None:
                 self._context.paper_simulator.close()
 
+    async def settle_market(self, outcome: str) -> None:
+        await self._context.execution_engine.settle_market(outcome)
+
     def _register_components(self) -> None:
         self._register_component(strategy_component())
         self._register_component(execution_component())

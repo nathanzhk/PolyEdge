@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app import ExecutionMode, Runtime
 from markets.btc import BTC5mMarket
+from markets.polymarket import get_crypto_price_result
 from strategies.production.dual_buy import DualBuyStrategy
 from strategy.strategy import DefaultStrategy
 from utils.env import Env
@@ -16,7 +17,7 @@ from utils.time import sleep_until
 logger = get_logger("MAIN")
 
 _DEFAULT_PREWARM_S = 20
-_DEFAULT_SHUTDOWN_S = 5
+_DEFAULT_SHUTDOWN_S = 240
 
 
 def _parse_args() -> argparse.Namespace:
@@ -112,13 +113,13 @@ async def run_worker(
         runtime.run(),
         name=f"runtime-{market.slug}",
     )
-    stop_task = asyncio.create_task(
-        sleep_until(market.end_ts_s + worker_grace_s),
-        name=f"stop-{market.slug}",
+    settlement_task = asyncio.create_task(
+        _settle_market_after_end(runtime, market, timeout_s=worker_grace_s),
+        name=f"settle-{market.slug}",
     )
 
     done, pending = await asyncio.wait(
-        {runtime_task, stop_task},
+        {runtime_task, settlement_task},
         return_when=asyncio.FIRST_COMPLETED,
     )
     for task in pending:
@@ -132,6 +133,37 @@ async def run_worker(
     logger.info("market ended; stop worker for %s", market.slug)
     runtime_task.cancel()
     await asyncio.gather(runtime_task, return_exceptions=True)
+
+
+async def _settle_market_after_end(
+    runtime: Runtime,
+    market: BTC5mMarket,
+    *,
+    timeout_s: int,
+) -> None:
+    await sleep_until(market.end_ts_s)
+    deadline = max(timeout_s, 0)
+    attempts = max(deadline, 1)
+    for attempt in range(attempts):
+        result = await asyncio.to_thread(
+            get_crypto_price_result,
+            symbol="BTC",
+            event_start_ts_s=market.start_ts_s,
+            variant="fiveminute",
+        )
+        if result is not None:
+            logger.info(
+                "market settled %s open=%.2f close=%.2f outcome=%s",
+                market.slug,
+                result["open_price"],
+                result["close_price"],
+                result["outcome"],
+            )
+            await runtime.settle_market(result["outcome"])
+            return
+        if attempt + 1 < attempts:
+            await asyncio.sleep(1)
+    logger.warning("market settlement unavailable before worker shutdown: %s", market.slug)
 
 
 async def run_supervisor(
