@@ -50,6 +50,10 @@ class ExecutionEngine:
             return
         await self._order_manager.handle_trade_event(event)
 
+    async def settle_market(self, outcome: str) -> None:
+        async with self._lock:
+            await self._order_manager.settle_market(self._market, outcome)
+
     async def handle_desired_position(self, desired_position: DesiredPositionEvent) -> None:
         async with self._lock:
             current_position, active_order = await self._order_manager.get_position_by_token(

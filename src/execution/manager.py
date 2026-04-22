@@ -171,6 +171,53 @@ class OrderManager:
                     break
             return self._build_current_position_event(market, token), active_order
 
+    async def settle_market(self, market: Market, outcome: str) -> None:
+        outcome_key = outcome.lower()
+        if outcome_key == market.yes_token.key:
+            winning_token = market.yes_token
+            losing_token = market.no_token
+        elif outcome_key == market.no_token.key:
+            winning_token = market.no_token
+            losing_token = market.yes_token
+        else:
+            raise ValueError(f"invalid market outcome: {outcome}")
+
+        async with self._lock:
+            for token, payout_price in ((winning_token, 1.0), (losing_token, 0.0)):
+                position = self._positions_by_token_id.get(token.id)
+                if position is None or position.shares <= _POSITION_SHARES_DUST:
+                    continue
+
+                current_position = self._build_current_position_event(market, token)
+                settling_shares = min(
+                    position.shares,
+                    max(position.shares - current_position.close_settling_shares, 0.0),
+                )
+                if settling_shares <= _POSITION_SHARES_DUST:
+                    continue
+
+                avg_price = position.avg_price
+                cost = round(settling_shares * avg_price, 6)
+                payout = round(settling_shares * payout_price, 6)
+                pnl = round(payout - cost, 6)
+                logger.info(
+                    "settle %s position: shares=%.6f cost=%.6f payout=%.6f pnl=%+.6f",
+                    token.key,
+                    settling_shares,
+                    cost,
+                    payout,
+                    pnl,
+                )
+                position.realized_pnl = round(position.realized_pnl + pnl, 6)
+                position.cost = round(position.cost - cost, 6)
+                position.shares = round(position.shares - settling_shares, 6)
+                if position.shares <= _POSITION_SHARES_DUST:
+                    position.cost = _ZERO
+                    position.shares = _ZERO
+
+        await self._publish_current_position_event(market, market.yes_token)
+        await self._publish_current_position_event(market, market.no_token)
+
     async def _submit_order(
         self, side: Side, market: Market, token: Token, shares: float, price: float, force: bool
     ) -> None:

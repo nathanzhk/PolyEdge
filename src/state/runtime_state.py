@@ -208,6 +208,7 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
             event.yes_token_position.closing_shares,
             event.yes_token_position.holding_cost,
             event.yes_token_position.holding_avg_price,
+            event.yes_token_position.realized_pnl,
         )
         if event.yes_token_position is not None
         else (),
@@ -217,6 +218,7 @@ def _event_signature(event: RuntimeStateEvent) -> tuple[Any, ...]:
             event.no_token_position.closing_shares,
             event.no_token_position.holding_cost,
             event.no_token_position.holding_avg_price,
+            event.no_token_position.realized_pnl,
         )
         if event.no_token_position is not None
         else (),
