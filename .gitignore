@@ -5,6 +5,7 @@
 logs/
 *.log
 *.json
+target/
 
 __pycache__/
 *.py[cod]

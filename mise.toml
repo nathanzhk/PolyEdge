@@ -1,5 +1,6 @@
 [tools]
 python = "3.13"
+rust = "latest"
 uv = "latest"
 
 [settings]
