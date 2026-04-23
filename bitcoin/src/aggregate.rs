@@ -23,11 +23,11 @@ const EXCHANGES: [WeightedExchange; 5] = [
     },
     WeightedExchange {
         name: "binance",
-        weight: 0.15,
+        weight: 0.25,
     },
     WeightedExchange {
         name: "bitstamp",
-        weight: 0.15,
+        weight: 0.05,
     },
     WeightedExchange {
         name: "coinbase",
