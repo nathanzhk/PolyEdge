@@ -215,25 +215,17 @@ impl LatestQuotes {
         let mut exchanges = Map::new();
 
         for ex in EXCHANGES {
-            let price = price_value(self.get(ex.name));
-            let delay = self.get(ex.name)
-                .and_then(|q| q.delay_ms)
-                .map(Value::from)
-                .unwrap_or(Value::Null);
-            let change = price_number(Some(&price)).and_then(|p| {
-                baseline
-                    .and_then(|b| price_number(b.get(ex.name)))
-                    .map(|b| p - b)
-            });
-            let baseline_price = baseline
-                .and_then(|b| b.get(ex.name).cloned())
-                .unwrap_or(Value::Null);
+            let quote = self.get(ex.name);
+            let mid = quote.map(|q| q.mid());
+            let baseline_mid = baseline.and_then(|b| price_number(b.get(ex.name)));
+            let change = mid.and_then(|p| baseline_mid.map(|b| p - b));
+            let delay = quote.and_then(|q| q.delay_ms);
 
             exchanges.insert(ex.name.to_string(), json!({
-                "price": price,
-                "delay": delay,
-                "change": change.map(Value::from).unwrap_or(Value::Null),
-                "baseline": baseline_price,
+                "price": mid.map(|p| Value::from(round_to(p, 4))).unwrap_or(Value::Null),
+                "delay": delay.map(|d| Value::from(round_to(d, 2))).unwrap_or(Value::Null),
+                "change": change.map(|c| Value::from(round_to(c, 4))).unwrap_or(Value::Null),
+                "baseline": baseline_mid.map(|b| Value::from(round_to(b, 4))).unwrap_or(Value::Null),
             }));
         }
 
@@ -251,12 +243,12 @@ impl LatestQuotes {
             .and_then(|price| baseline_composite.map(|b| price - b));
 
         json!({
-            "timestamp": local_timestamp_ms,
+            "timestamp": local_timestamp_ms as u64,
             "window_start": window.start_seconds,
             "window_end": window.end_seconds,
-            "price": self.composite_price().map(Value::from).unwrap_or(Value::Null),
-            "change": composite_change.map(Value::from).unwrap_or(Value::Null),
-            "baseline": baseline_composite.map(Value::from).unwrap_or(Value::Null),
+            "price": self.composite_price().map(|p| Value::from(round_to(p, 4))).unwrap_or(Value::Null),
+            "change": composite_change.map(|c| Value::from(round_to(c, 4))).unwrap_or(Value::Null),
+            "baseline": baseline_composite.map(|b| Value::from(round_to(b, 4))).unwrap_or(Value::Null),
             "exchanges": self.exchanges_snapshot(baseline),
         })
     }
@@ -287,6 +279,11 @@ fn price_value(quote: Option<&Quote>) -> Value {
     quote
         .map(|quote| Value::from(quote.mid()))
         .unwrap_or(Value::Null)
+}
+
+fn round_to(value: f64, decimals: u32) -> f64 {
+    let factor = 10f64.powi(decimals as i32);
+    (value * factor).round() / factor
 }
 
 fn price_number(value: Option<&Value>) -> Option<f64> {
