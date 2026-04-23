@@ -10,6 +10,7 @@ use axum::{
     response::{Html, IntoResponse},
     routing::get,
 };
+use futures_util::{SinkExt, StreamExt};
 use tokio::sync::broadcast;
 use tracing::info;
 
@@ -41,10 +42,33 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| stream_snapshots(socket, state.snapshots.subscribe()))
 }
 
-async fn stream_snapshots(mut socket: WebSocket, mut snapshots: broadcast::Receiver<String>) {
-    while let Ok(snapshot) = snapshots.recv().await {
-        if socket.send(Message::Text(snapshot.into())).await.is_err() {
-            break;
+async fn stream_snapshots(socket: WebSocket, mut snapshots: broadcast::Receiver<String>) {
+    let (mut sink, mut stream) = socket.split();
+
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Ping(payload))) => {
+                        if sink.send(Message::Pong(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) => break,
+                    _ => {}
+                }
+            }
+            snapshot = snapshots.recv() => {
+                match snapshot {
+                    Ok(data) => {
+                        if sink.send(Message::Text(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
         }
     }
 }
