@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::json;
 
-use super::{ExchangeFeed, FeedEvent, Quote, parse_f64};
+use super::{ExchangeFeed, FeedEvent, Quote, parse_f64_str};
 
 #[derive(Clone, Debug)]
 pub struct Bybit {
@@ -15,6 +16,22 @@ impl Default for Bybit {
             topic: "orderbook.1.BTCUSDT",
         }
     }
+}
+
+#[derive(Deserialize)]
+struct OrderbookMessage {
+    topic: Option<String>,
+    op: Option<String>,
+    success: Option<bool>,
+    ret_msg: Option<String>,
+    ts: Option<f64>,
+    data: Option<OrderbookData>,
+}
+
+#[derive(Deserialize)]
+struct OrderbookData {
+    b: Vec<Vec<String>>,
+    a: Vec<Vec<String>>,
 }
 
 impl ExchangeFeed for Bybit {
@@ -45,30 +62,25 @@ impl ExchangeFeed for Bybit {
     }
 
     fn handle_text(&self, raw: &str, received_at_ms: f64) -> FeedEvent {
-        let Ok(message) = serde_json::from_str::<Value>(raw) else {
+        let Ok(msg) = serde_json::from_str::<OrderbookMessage>(raw) else {
             return FeedEvent::Error("bybit failed to parse message".to_string());
         };
 
-        if message.get("topic").and_then(Value::as_str) == Some(self.topic) {
-            return parse_orderbook_top(&message, received_at_ms)
+        if msg.topic.as_deref() == Some(self.topic) {
+            return parse_orderbook_top(&msg, received_at_ms)
                 .map(FeedEvent::Quote)
                 .unwrap_or(FeedEvent::Ignore);
         }
 
-        if message.get("op").and_then(Value::as_str) == Some("subscribe")
-            && message.get("success").and_then(Value::as_bool) == Some(false)
-        {
+        if msg.op.as_deref() == Some("subscribe") && msg.success == Some(false) {
             return FeedEvent::Error(format!(
                 "bybit subscribe error: {}",
-                message
-                    .get("ret_msg")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error")
+                msg.ret_msg.as_deref().unwrap_or("unknown error")
             ));
         }
 
-        if message.get("op").and_then(Value::as_str) == Some("pong")
-            || message.get("ret_msg").and_then(Value::as_str) == Some("pong")
+        if msg.op.as_deref() == Some("pong")
+            || msg.ret_msg.as_deref() == Some("pong")
         {
             return FeedEvent::Ignore;
         }
@@ -77,10 +89,11 @@ impl ExchangeFeed for Bybit {
     }
 }
 
-fn parse_orderbook_top(message: &Value, received_at_ms: f64) -> Option<Quote> {
-    let timestamp_ms = parse_f64(message.get("ts"))?;
-    let best_bid = parse_f64(message.pointer("/data/b/0/0"))?;
-    let best_ask = parse_f64(message.pointer("/data/a/0/0"))?;
+fn parse_orderbook_top(msg: &OrderbookMessage, received_at_ms: f64) -> Option<Quote> {
+    let timestamp_ms = msg.ts?;
+    let data = msg.data.as_ref()?;
+    let best_bid = parse_f64_str(data.b.first()?.first()?)?;
+    let best_ask = parse_f64_str(data.a.first()?.first()?)?;
 
     Some(Quote::with_delay(
         timestamp_ms,

@@ -4,17 +4,13 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::{select, sync::mpsc, time};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tracing::{error, info};
 
-#[rustfmt::skip]
-pub mod bybit;
-#[rustfmt::skip]
-pub mod gemini;
-#[rustfmt::skip]
 pub mod binance;
-#[rustfmt::skip]
 pub mod bitstamp;
-#[rustfmt::skip]
+pub mod bybit;
 pub mod coinbase;
+pub mod gemini;
 
 #[derive(Clone, Debug)]
 pub struct FeedConfig {
@@ -105,15 +101,15 @@ where
     loop {
         match run_once(feed.clone(), updates.clone()).await {
             Ok(()) => {
-                eprintln!("{} websocket closed cleanly", feed.name());
+                info!("{} websocket closed cleanly", feed.name());
                 reconnect_delay = config.reconnect_min_delay;
             }
             Err(error) => {
-                eprintln!("{} websocket error: {error:#}", feed.name());
+                error!("{} websocket error: {error:#}", feed.name());
             }
         }
 
-        eprintln!(
+        info!(
             "{} reconnecting in {:.1}s",
             feed.name(),
             reconnect_delay.as_secs_f64()
@@ -131,7 +127,7 @@ where
         .await
         .with_context(|| format!("connect {}", feed.url()))?;
 
-    eprintln!("{} connected {}", feed.name(), feed.url());
+    info!("{} connected {}", feed.name(), feed.url());
 
     for subscription in feed.subscriptions() {
         ws.send(Message::Text(subscription.into()))
@@ -171,7 +167,7 @@ where
                     Message::Ping(payload) => ws.send(Message::Pong(payload)).await?,
                     Message::Pong(_) => {}
                     Message::Close(frame) => {
-                        eprintln!("{} closed by peer: {:?}", feed.name(), frame);
+                        info!("{} closed by peer: {:?}", feed.name(), frame);
                         return Ok(());
                     }
                     Message::Frame(_) => {}
@@ -192,11 +188,11 @@ async fn handle_event(
             .await
             .with_context(|| format!("send {exchange} quote update")),
         FeedEvent::Info(message) => {
-            eprintln!("{message}");
+            info!("{message}");
             Ok(())
         }
         FeedEvent::Error(message) => {
-            eprintln!("{message}");
+            error!("{message}");
             Ok(())
         }
         FeedEvent::Ignore => Ok(()),
@@ -210,12 +206,8 @@ pub fn now_unix_ms() -> f64 {
     now.as_secs_f64() * 1000.0
 }
 
-pub fn parse_f64(value: Option<&serde_json::Value>) -> Option<f64> {
-    match value? {
-        serde_json::Value::String(text) => finite_or_none(text.parse().ok()?),
-        serde_json::Value::Number(number) => finite_or_none(number.as_f64()?),
-        _ => None,
-    }
+pub fn parse_f64_str(text: &str) -> Option<f64> {
+    finite_or_none(text.parse().ok()?)
 }
 
 pub fn finite_or_none(value: f64) -> Option<f64> {

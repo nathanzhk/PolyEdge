@@ -1,6 +1,7 @@
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{ExchangeFeed, FeedEvent, Quote, parse_f64};
+use super::{ExchangeFeed, FeedEvent, Quote, parse_f64_str};
 
 #[derive(Clone, Debug)]
 pub struct Gemini {
@@ -15,6 +16,16 @@ impl Default for Gemini {
             stream: "btcusd@bookTicker",
         }
     }
+}
+
+#[derive(Deserialize)]
+struct BookTickerMessage {
+    s: Option<String>,
+    #[serde(rename = "E")]
+    event_time: Option<u64>,
+    b: Option<String>,
+    a: Option<String>,
+    error: Option<Value>,
 }
 
 impl ExchangeFeed for Gemini {
@@ -38,20 +49,20 @@ impl ExchangeFeed for Gemini {
     }
 
     fn handle_text(&self, raw: &str, received_at_ms: f64) -> FeedEvent {
-        let Ok(message) = serde_json::from_str::<Value>(raw) else {
+        let Ok(msg) = serde_json::from_str::<BookTickerMessage>(raw) else {
             return FeedEvent::Error("gemini failed to parse message".to_string());
         };
 
-        if message.get("s").and_then(Value::as_str) == Some(self.symbol)
-            && message.get("b").is_some()
-            && message.get("a").is_some()
+        if msg.s.as_deref() == Some(self.symbol)
+            && msg.b.is_some()
+            && msg.a.is_some()
         {
-            return parse_book_ticker(&message, received_at_ms)
+            return parse_book_ticker(&msg, received_at_ms)
                 .map(FeedEvent::Quote)
                 .unwrap_or(FeedEvent::Ignore);
         }
 
-        if let Some(error) = message.get("error") {
+        if let Some(error) = &msg.error {
             return FeedEvent::Error(format!("gemini error: {error}"));
         }
 
@@ -59,10 +70,10 @@ impl ExchangeFeed for Gemini {
     }
 }
 
-fn parse_book_ticker(message: &Value, received_at_ms: f64) -> Option<Quote> {
-    let timestamp_ms = message.get("E")?.as_u64()? as f64 / 1_000_000.0;
-    let best_bid = parse_f64(message.get("b"))?;
-    let best_ask = parse_f64(message.get("a"))?;
+fn parse_book_ticker(msg: &BookTickerMessage, received_at_ms: f64) -> Option<Quote> {
+    let timestamp_ms = msg.event_time? as f64 / 1_000_000.0;
+    let best_bid = parse_f64_str(msg.b.as_deref()?)?;
+    let best_ask = parse_f64_str(msg.a.as_deref()?)?;
 
     Some(Quote::with_delay(
         timestamp_ms,

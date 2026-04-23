@@ -5,29 +5,39 @@ mod exchanges;
 use std::net::SocketAddr;
 
 use aggregate::{AggregateConfig, run_aggregator};
-use anyhow::{Result, bail};
+use anyhow::Result;
+use clap::Parser;
 use dashboard::run_dashboard;
 use exchanges::{FeedConfig, run_feed};
-#[rustfmt::skip]
 use exchanges::{
     binance::Binance,
     bitstamp::Bitstamp,
-    coinbase::Coinbase,
     bybit::Bybit,
+    coinbase::Coinbase,
     gemini::Gemini,
 };
 use tokio::sync::{broadcast, mpsc};
+use tracing::info;
 
 const DEFAULT_LOG_PATH: &str = "logs/aggregate.log";
 const DASHBOARD_ADDR: &str = "127.0.0.1:8080";
 
+#[derive(Parser)]
+#[command(name = "bitcoin", about = "BTC exchange composite price tracker")]
+struct Args {
+    #[arg(long)]
+    dashboard: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Args::parse()?;
+    tracing_subscriber::fmt::init();
+
+    let args = Args::parse();
     let feed_config = FeedConfig::default();
     let aggregate_config = AggregateConfig::new(DEFAULT_LOG_PATH);
 
-    run(feed_config, aggregate_config, args.enable_dashboard).await
+    run(feed_config, aggregate_config, args.dashboard).await
 }
 
 async fn run(
@@ -52,12 +62,12 @@ async fn run(
 
     spawn_feed(Bybit::default(), feed_config.clone(), updates_tx.clone());
     spawn_feed(Gemini::default(), feed_config.clone(), updates_tx.clone());
-    spawn_feed(Binance::default(), feed_config.clone(), updates_tx.clone());
+    spawn_feed(Binance, feed_config.clone(), updates_tx.clone());
     spawn_feed(Bitstamp::default(), feed_config.clone(), updates_tx.clone());
     spawn_feed(Coinbase::default(), feed_config, updates_tx);
 
     tokio::signal::ctrl_c().await?;
-    eprintln!("received ctrl-c, shutting down");
+    info!("received ctrl-c, shutting down");
     aggregator.abort();
     if let Some(dashboard) = dashboard {
         dashboard.abort();
@@ -71,32 +81,7 @@ where
 {
     tokio::spawn(async move {
         if let Err(error) = run_feed(feed, config, updates).await {
-            eprintln!("feed task exited: {error:#}");
+            tracing::error!("feed task exited: {error:#}");
         }
     });
-}
-
-#[derive(Debug)]
-struct Args {
-    enable_dashboard: bool,
-}
-
-impl Args {
-    fn parse() -> Result<Self> {
-        let mut enable_dashboard = false;
-        let mut args = std::env::args().skip(1);
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--dashboard" => enable_dashboard = true,
-                "--help" | "-h" => {
-                    println!("usage: bitcoin [--dashboard]");
-                    std::process::exit(0);
-                }
-                _ => bail!("unexpected argument '{arg}'"),
-            }
-        }
-
-        Ok(Self { enable_dashboard })
-    }
 }

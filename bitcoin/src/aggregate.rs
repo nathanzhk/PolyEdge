@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -56,55 +57,31 @@ struct WeightedExchange {
 
 #[derive(Default, Debug)]
 struct LatestQuotes {
-    bybit: Option<Quote>,
-    gemini: Option<Quote>,
-    binance: Option<Quote>,
-    bitstamp: Option<Quote>,
-    coinbase: Option<Quote>,
+    quotes: HashMap<&'static str, Quote>,
 }
 
 impl LatestQuotes {
     fn update(&mut self, update: FeedUpdate) {
-        match update.exchange {
-            "bybit" => self.bybit = Some(update.quote),
-            "gemini" => self.gemini = Some(update.quote),
-            "binance" => self.binance = Some(update.quote),
-            "bitstamp" => self.bitstamp = Some(update.quote),
-            "coinbase" => self.coinbase = Some(update.quote),
-            exchange => eprintln!("ignoring unknown exchange update: {exchange}"),
-        }
+        self.quotes.insert(update.exchange, update.quote);
     }
 
     fn get(&self, exchange: &str) -> Option<&Quote> {
-        match exchange {
-            "bybit" => self.bybit.as_ref(),
-            "gemini" => self.gemini.as_ref(),
-            "binance" => self.binance.as_ref(),
-            "bitstamp" => self.bitstamp.as_ref(),
-            "coinbase" => self.coinbase.as_ref(),
-            _ => None,
-        }
+        self.quotes.get(exchange)
     }
 
     fn composite_price(&self) -> Option<f64> {
-        let total_weight: f64 = EXCHANGES
-            .iter()
-            .filter_map(|exchange| self.eligible_quote(exchange.name).map(|_| exchange.weight))
-            .sum();
+        let (total_weight, weighted_sum) = EXCHANGES.iter().fold((0.0, 0.0), |(tw, ws), ex| {
+            match self.eligible_quote(ex.name) {
+                Some(quote) => (tw + ex.weight, ws + quote.mid() * ex.weight),
+                None => (tw, ws),
+            }
+        });
 
         if total_weight == 0.0 {
             return None;
         }
 
-        Some(
-            EXCHANGES
-                .iter()
-                .filter_map(|exchange| {
-                    self.eligible_quote(exchange.name)
-                        .map(|quote| quote.mid() * exchange.weight / total_weight)
-                })
-                .sum(),
-        )
+        Some(weighted_sum / total_weight)
     }
 
     fn eligible_quote(&self, exchange: &str) -> Option<&Quote> {
@@ -120,13 +97,14 @@ impl LatestQuotes {
             .map(|price| format!("{price:.8}"))
             .unwrap_or_else(|| "NA".to_string());
 
+        let exchanges: Vec<String> = EXCHANGES
+            .iter()
+            .map(|ex| self.format_exchange(ex.name))
+            .collect();
+
         format!(
-            "{local_timestamp_ms:.0} -> {}, {}, {}, {}, {} -> {composite}",
-            self.format_exchange("bybit"),
-            self.format_exchange("gemini"),
-            self.format_exchange("binance"),
-            self.format_exchange("bitstamp"),
-            self.format_exchange("coinbase"),
+            "{local_timestamp_ms:.0} -> {} -> {composite}",
+            exchanges.join(", ")
         )
     }
 
@@ -303,15 +281,16 @@ impl LatestQuotes {
             .map(|price| format!("{price:.8}"))
             .unwrap_or_else(|| "NA".to_string());
 
+        let exchanges: Vec<String> = EXCHANGES
+            .iter()
+            .map(|ex| self.format_exchange(ex.name))
+            .collect();
+
         format!(
-            "WINDOW start={} end={} frozen_at={local_timestamp_ms:.0} -> {}, {}, {}, {}, {} -> {composite}",
+            "WINDOW start={} end={} frozen_at={local_timestamp_ms:.0} -> {} -> {composite}",
             window.start_seconds,
             window.end_seconds,
-            self.format_exchange("bybit"),
-            self.format_exchange("gemini"),
-            self.format_exchange("binance"),
-            self.format_exchange("bitstamp"),
-            self.format_exchange("coinbase"),
+            exchanges.join(", ")
         )
     }
 }
