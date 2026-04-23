@@ -31,13 +31,17 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    let file_appender = tracing_appender::rolling::daily("logs", "tracing.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    tracing_subscriber::fmt().with_writer(non_blocking).init();
 
     let args = Args::parse();
     let feed_config = FeedConfig::default();
     let aggregate_config = AggregateConfig::new(DEFAULT_LOG_PATH);
 
-    run(feed_config, aggregate_config, args.dashboard).await
+    let result = run(feed_config, aggregate_config, args.dashboard).await;
+    drop(_guard);
+    result
 }
 
 async fn run(
