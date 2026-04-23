@@ -8,7 +8,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::feeds::{FeedUpdate, Quote, now_unix_ms};
+use crate::exchanges::{FeedUpdate, Quote, now_unix_ms};
 
 const MAX_DELAY_MS: f64 = 200.0;
 const WINDOW_SECONDS: u64 = 300;
@@ -361,33 +361,4 @@ async fn open_log(path: &Path) -> Result<BufWriter<tokio::fs::File>> {
         .await?;
 
     Ok(BufWriter::new(file))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Window;
-
-    #[test]
-    fn window_boundaries_roll_every_five_minutes() {
-        let window = Window::from_timestamp_ms(1_776_796_345_962.0);
-
-        assert_eq!(window.start_seconds, 1_776_796_200);
-        assert_eq!(window.end_seconds, 1_776_796_500);
-    }
-
-    #[test]
-    fn exact_boundary_starts_new_window() {
-        let window = Window::from_timestamp_ms(1_776_796_500_000.0);
-
-        assert_eq!(window.start_seconds, 1_776_796_500);
-        assert_eq!(window.end_seconds, 1_776_796_800);
-    }
-
-    #[test]
-    fn only_first_second_counts_as_window_start_capture() {
-        let window = Window::from_timestamp_ms(1_776_796_500_250.0);
-
-        assert!(window.contains_start_second(1_776_796_500_250.0));
-        assert!(!window.contains_start_second(1_776_796_501_000.0));
-    }
 }

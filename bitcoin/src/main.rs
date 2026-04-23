@@ -1,15 +1,15 @@
 mod aggregate;
 mod dashboard;
-mod feeds;
+mod exchanges;
 
 use std::net::SocketAddr;
 
 use aggregate::{AggregateConfig, run_aggregator};
 use anyhow::{Result, bail};
 use dashboard::run_dashboard;
-use feeds::{FeedConfig, run_feed};
+use exchanges::{FeedConfig, run_feed};
 #[rustfmt::skip]
-use feeds::{
+use exchanges::{
     binance::Binance,
     bitstamp::Bitstamp,
     coinbase::Coinbase,
@@ -65,9 +65,9 @@ async fn run(
     Ok(())
 }
 
-fn spawn_feed<F>(feed: F, config: FeedConfig, updates: mpsc::Sender<feeds::FeedUpdate>)
+fn spawn_feed<F>(feed: F, config: FeedConfig, updates: mpsc::Sender<exchanges::FeedUpdate>)
 where
-    F: feeds::ExchangeFeed,
+    F: exchanges::ExchangeFeed,
 {
     tokio::spawn(async move {
         if let Err(error) = run_feed(feed, config, updates).await {
