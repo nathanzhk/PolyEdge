@@ -155,6 +155,7 @@ pub async fn run_aggregator(
             Some(start) if start != window.start_seconds => {
                 current_window_start = Some(window.start_seconds);
                 baseline = Some(state.prices());
+                baseline_composite = state.composite_price();
                 should_log_window = true;
             }
             Some(_) => {}
