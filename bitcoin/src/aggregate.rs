@@ -131,7 +131,8 @@ pub async fn run_aggregator(
 ) -> Result<()> {
     let mut state = LatestQuotes::default();
     let mut current_window_start = None;
-    let mut baseline = None;
+    let mut baseline: Option<PriceMap> = None;
+    let mut baseline_composite: Option<f64> = None;
     let mut writer = open_log(&config.log_path).await?;
 
     while let Some(update) = updates.recv().await {
@@ -147,6 +148,7 @@ pub async fn run_aggregator(
                 current_window_start = Some(window.start_seconds);
                 if window.contains_start_second(local_timestamp_ms) {
                     baseline = Some(state.prices());
+                    baseline_composite = state.composite_price();
                     should_log_window = true;
                 }
             }
@@ -166,7 +168,7 @@ pub async fn run_aggregator(
             .await?;
         }
 
-        let snapshot = state.dashboard_snapshot(local_timestamp_ms, window, baseline.as_ref());
+        let snapshot = state.dashboard_snapshot(local_timestamp_ms, window, baseline.as_ref(), baseline_composite);
         let _ = dashboard_tx.send(snapshot.to_string());
     }
 
@@ -206,51 +208,36 @@ impl LatestQuotes {
             );
         }
 
-        prices.insert(
-            "combined".to_string(),
-            self.composite_price()
-                .map(Value::from)
-                .unwrap_or(Value::Null),
-        );
-
         prices
     }
 
-    fn delays(&self) -> PriceMap {
-        let mut delays = Map::new();
+    fn exchanges_snapshot(&self, baseline: Option<&PriceMap>) -> Value {
+        let mut exchanges = Map::new();
 
-        for exchange in EXCHANGES {
-            delays.insert(
-                exchange.name.to_string(),
-                self.get(exchange.name)
-                    .and_then(|quote| quote.delay_ms)
-                    .map(Value::from)
-                    .unwrap_or(Value::Null),
-            );
-        }
-
-        delays.insert("combined".to_string(), Value::Null);
-        delays
-    }
-
-    fn changes(&self, baseline: Option<&PriceMap>) -> PriceMap {
-        let prices = self.prices();
-        let mut changes = Map::new();
-
-        for key in prices.keys() {
-            let change = price_number(prices.get(key)).and_then(|price| {
+        for ex in EXCHANGES {
+            let price = price_value(self.get(ex.name));
+            let delay = self.get(ex.name)
+                .and_then(|q| q.delay_ms)
+                .map(Value::from)
+                .unwrap_or(Value::Null);
+            let change = price_number(Some(&price)).and_then(|p| {
                 baseline
-                    .and_then(|baseline| price_number(baseline.get(key)))
-                    .map(|baseline| price - baseline)
+                    .and_then(|b| price_number(b.get(ex.name)))
+                    .map(|b| p - b)
             });
+            let baseline_price = baseline
+                .and_then(|b| b.get(ex.name).cloned())
+                .unwrap_or(Value::Null);
 
-            changes.insert(
-                key.to_string(),
-                change.map(Value::from).unwrap_or(Value::Null),
-            );
+            exchanges.insert(ex.name.to_string(), json!({
+                "price": price,
+                "delay": delay,
+                "change": change.map(Value::from).unwrap_or(Value::Null),
+                "baseline": baseline_price,
+            }));
         }
 
-        changes
+        Value::Object(exchanges)
     }
 
     fn dashboard_snapshot(
@@ -258,20 +245,19 @@ impl LatestQuotes {
         local_timestamp_ms: f64,
         window: Window,
         baseline: Option<&PriceMap>,
+        baseline_composite: Option<f64>,
     ) -> Value {
-        let prices = self.prices();
-        let baseline_prices = baseline.cloned().unwrap_or_else(null_prices);
+        let composite_change = self.composite_price()
+            .and_then(|price| baseline_composite.map(|b| price - b));
 
         json!({
             "timestamp": local_timestamp_ms,
             "window_start": window.start_seconds,
             "window_end": window.end_seconds,
-            "prices": prices,
-            "delays": self.delays(),
-            "changes": self.changes(baseline),
-            "baseline": {
-                "prices": baseline_prices,
-            },
+            "price": self.composite_price().map(Value::from).unwrap_or(Value::Null),
+            "change": composite_change.map(Value::from).unwrap_or(Value::Null),
+            "baseline": baseline_composite.map(Value::from).unwrap_or(Value::Null),
+            "exchanges": self.exchanges_snapshot(baseline),
         })
     }
 
@@ -309,16 +295,6 @@ fn price_number(value: Option<&Value>) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
-fn null_prices() -> PriceMap {
-    let mut prices = Map::new();
-
-    for exchange in EXCHANGES {
-        prices.insert(exchange.name.to_string(), Value::Null);
-    }
-
-    prices.insert("combined".to_string(), Value::Null);
-    prices
-}
 
 async fn write_line(writer: &mut BufWriter<tokio::fs::File>, line: &str) -> Result<()> {
     writer.write_all(line.as_bytes()).await?;

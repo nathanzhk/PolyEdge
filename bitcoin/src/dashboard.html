@@ -343,8 +343,8 @@
 
     function updateSummary(snapshot) {
       for (const item of series) {
-        const price = snapshot.prices[item.key];
-        const change = snapshot.changes[item.key];
+        const price = exPrice(snapshot, item.key);
+        const change = exChange(snapshot, item.key);
         const priceEl = document.getElementById("price-" + item.key);
         const changeEl = document.getElementById("change-" + item.key);
         priceEl.textContent = formatPrice(price);
@@ -352,12 +352,24 @@
         changeEl.className = "change " + (isNumber(change) && change >= 0 ? "positive" : "negative");
 
         if (item.key !== "combined") {
-          document.getElementById("delay-" + item.key).textContent = formatDelay(snapshot.delays[item.key]);
+          document.getElementById("delay-" + item.key).textContent = formatDelay(exDelay(snapshot, item.key));
         }
       }
 
       windowEl.textContent = "Window " + timeLabel(snapshot.window_start) + " - " + timeLabel(snapshot.window_end);
       setStatus("Live " + new Date(snapshot.timestamp).toLocaleTimeString());
+    }
+
+    function exPrice(snapshot, key) {
+      return key === "combined" ? snapshot.price : snapshot.exchanges[key]?.price;
+    }
+
+    function exDelay(snapshot, key) {
+      return snapshot.exchanges[key]?.delay;
+    }
+
+    function exChange(snapshot, key) {
+      return key === "combined" ? snapshot.change : snapshot.exchanges[key]?.change;
     }
 
     function ingest(snapshot) {
@@ -435,7 +447,7 @@
     }
 
     function drawBaseline(plot, minPrice, maxPrice) {
-      const base = latest?.baseline?.prices?.combined;
+      const base = latest?.baseline;
       if (!isNumber(base)) {
         return;
       }
@@ -470,7 +482,7 @@
 
         const path = [];
         for (const point of points) {
-          const price = point.prices[item.key];
+          const price = exPrice(point, item.key);
           if (!isNumber(price)) {
             continue;
           }
@@ -545,7 +557,7 @@
       let maxValue = -Infinity;
       for (const point of points) {
         for (const item of series) {
-          const price = point.prices[item.key];
+          const price = exPrice(point, item.key);
           if (isNumber(price)) {
             if (price < minValue) minValue = price;
             if (price > maxValue) maxValue = price;
