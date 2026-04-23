@@ -321,7 +321,6 @@ fn null_prices() -> PriceMap {
 }
 
 async fn write_line(writer: &mut BufWriter<tokio::fs::File>, line: &str) -> Result<()> {
-    println!("{line}");
     writer.write_all(line.as_bytes()).await?;
     writer.write_all(b"\n").await?;
     writer.flush().await?;
