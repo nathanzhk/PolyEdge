@@ -1,15 +1,17 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use serde_json::{Map, Value, json};
 use tokio::{
     fs::OpenOptions,
     io::{AsyncWriteExt, BufWriter},
-    sync::mpsc,
+    sync::{broadcast, mpsc},
 };
 
 use crate::feeds::{FeedUpdate, Quote, now_unix_ms};
 
 const MAX_DELAY_MS: f64 = 200.0;
+const WINDOW_SECONDS: u64 = 300;
 const EXCHANGES: [WeightedExchange; 5] = [
     WeightedExchange {
         name: "bybit",
@@ -147,19 +149,203 @@ impl LatestQuotes {
 pub async fn run_aggregator(
     mut updates: mpsc::Receiver<FeedUpdate>,
     config: AggregateConfig,
+    dashboard_tx: broadcast::Sender<String>,
 ) -> Result<()> {
     let mut state = LatestQuotes::default();
+    let mut current_window_start = None;
+    let mut baseline = None;
     let mut writer = open_log(&config.log_path).await?;
 
     while let Some(update) = updates.recv().await {
+        let local_timestamp_ms = now_unix_ms();
+        let window = Window::from_timestamp_ms(local_timestamp_ms);
+
         state.update(update);
-        let line = state.log_line(now_unix_ms());
-        println!("{line}");
-        writer.write_all(line.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
+        write_line(&mut writer, &state.log_line(local_timestamp_ms)).await?;
+
+        let mut should_log_window = false;
+        match current_window_start {
+            None => {
+                current_window_start = Some(window.start_seconds);
+                if window.contains_start_second(local_timestamp_ms) {
+                    baseline = Some(state.prices());
+                    should_log_window = true;
+                }
+            }
+            Some(start) if start != window.start_seconds => {
+                current_window_start = Some(window.start_seconds);
+                baseline = Some(state.prices());
+                should_log_window = true;
+            }
+            Some(_) => {}
+        }
+
+        if should_log_window {
+            write_line(
+                &mut writer,
+                &state.window_log_line(window, local_timestamp_ms),
+            )
+            .await?;
+        }
+
+        let snapshot = state.dashboard_snapshot(local_timestamp_ms, window, baseline.as_ref());
+        let _ = dashboard_tx.send(snapshot.to_string());
     }
 
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Window {
+    start_seconds: u64,
+    end_seconds: u64,
+}
+
+impl Window {
+    fn from_timestamp_ms(timestamp_ms: f64) -> Self {
+        let timestamp_seconds = (timestamp_ms / 1000.0).floor() as u64;
+        let start_seconds = timestamp_seconds - (timestamp_seconds % WINDOW_SECONDS);
+
+        Self {
+            start_seconds,
+            end_seconds: start_seconds + WINDOW_SECONDS,
+        }
+    }
+
+    fn contains_start_second(&self, timestamp_ms: f64) -> bool {
+        (timestamp_ms / 1000.0).floor() as u64 == self.start_seconds
+    }
+}
+
+impl LatestQuotes {
+    fn prices(&self) -> PriceMap {
+        let mut prices = Map::new();
+
+        for exchange in EXCHANGES {
+            prices.insert(
+                exchange.name.to_string(),
+                price_value(self.get(exchange.name)),
+            );
+        }
+
+        prices.insert(
+            "combined".to_string(),
+            self.composite_price()
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+
+        prices
+    }
+
+    fn delays(&self) -> PriceMap {
+        let mut delays = Map::new();
+
+        for exchange in EXCHANGES {
+            delays.insert(
+                exchange.name.to_string(),
+                self.get(exchange.name)
+                    .and_then(|quote| quote.delay_ms)
+                    .map(Value::from)
+                    .unwrap_or(Value::Null),
+            );
+        }
+
+        delays.insert("combined".to_string(), Value::Null);
+        delays
+    }
+
+    fn changes(&self, baseline: Option<&PriceMap>) -> PriceMap {
+        let prices = self.prices();
+        let mut changes = Map::new();
+
+        for key in prices.keys() {
+            let change = price_number(prices.get(key)).and_then(|price| {
+                baseline
+                    .and_then(|baseline| price_number(baseline.get(key)))
+                    .map(|baseline| price - baseline)
+            });
+
+            changes.insert(
+                key.to_string(),
+                change.map(Value::from).unwrap_or(Value::Null),
+            );
+        }
+
+        changes
+    }
+
+    fn dashboard_snapshot(
+        &self,
+        local_timestamp_ms: f64,
+        window: Window,
+        baseline: Option<&PriceMap>,
+    ) -> Value {
+        let prices = self.prices();
+        let baseline_prices = baseline.cloned().unwrap_or_else(null_prices);
+
+        json!({
+            "timestamp": local_timestamp_ms,
+            "window_start": window.start_seconds,
+            "window_end": window.end_seconds,
+            "prices": prices,
+            "delays": self.delays(),
+            "changes": self.changes(baseline),
+            "baseline": {
+                "prices": baseline_prices,
+            },
+        })
+    }
+
+    fn window_log_line(&self, window: Window, local_timestamp_ms: f64) -> String {
+        let composite = self
+            .composite_price()
+            .map(|price| format!("{price:.8}"))
+            .unwrap_or_else(|| "NA".to_string());
+
+        format!(
+            "WINDOW start={} end={} frozen_at={local_timestamp_ms:.0} -> {}, {}, {}, {}, {} -> {composite}",
+            window.start_seconds,
+            window.end_seconds,
+            self.format_exchange("bybit"),
+            self.format_exchange("gemini"),
+            self.format_exchange("binance"),
+            self.format_exchange("bitstamp"),
+            self.format_exchange("coinbase"),
+        )
+    }
+}
+
+type PriceMap = Map<String, Value>;
+
+fn price_value(quote: Option<&Quote>) -> Value {
+    quote
+        .map(|quote| Value::from(quote.mid()))
+        .unwrap_or(Value::Null)
+}
+
+fn price_number(value: Option<&Value>) -> Option<f64> {
+    value
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+}
+
+fn null_prices() -> PriceMap {
+    let mut prices = Map::new();
+
+    for exchange in EXCHANGES {
+        prices.insert(exchange.name.to_string(), Value::Null);
+    }
+
+    prices.insert("combined".to_string(), Value::Null);
+    prices
+}
+
+async fn write_line(writer: &mut BufWriter<tokio::fs::File>, line: &str) -> Result<()> {
+    println!("{line}");
+    writer.write_all(line.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
+    writer.flush().await?;
     Ok(())
 }
 
@@ -175,4 +361,33 @@ async fn open_log(path: &Path) -> Result<BufWriter<tokio::fs::File>> {
         .await?;
 
     Ok(BufWriter::new(file))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Window;
+
+    #[test]
+    fn window_boundaries_roll_every_five_minutes() {
+        let window = Window::from_timestamp_ms(1_776_796_345_962.0);
+
+        assert_eq!(window.start_seconds, 1_776_796_200);
+        assert_eq!(window.end_seconds, 1_776_796_500);
+    }
+
+    #[test]
+    fn exact_boundary_starts_new_window() {
+        let window = Window::from_timestamp_ms(1_776_796_500_000.0);
+
+        assert_eq!(window.start_seconds, 1_776_796_500);
+        assert_eq!(window.end_seconds, 1_776_796_800);
+    }
+
+    #[test]
+    fn only_first_second_counts_as_window_start_capture() {
+        let window = Window::from_timestamp_ms(1_776_796_500_250.0);
+
+        assert!(window.contains_start_second(1_776_796_500_250.0));
+        assert!(!window.contains_start_second(1_776_796_501_000.0));
+    }
 }

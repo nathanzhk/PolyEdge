@@ -1,8 +1,12 @@
 mod aggregate;
+mod dashboard;
 mod feeds;
+
+use std::net::SocketAddr;
 
 use aggregate::{AggregateConfig, run_aggregator};
 use anyhow::{Result, bail};
+use dashboard::run_dashboard;
 use feeds::{FeedConfig, run_feed};
 #[rustfmt::skip]
 use feeds::{
@@ -12,44 +16,52 @@ use feeds::{
     bybit::Bybit,
     gemini::Gemini,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
+
+const DEFAULT_LOG_PATH: &str = "logs/aggregate.log";
+const DASHBOARD_ADDR: &str = "127.0.0.1:8080";
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse()?;
     let feed_config = FeedConfig::default();
-    let aggregate_config = AggregateConfig::new(args.log_path);
+    let aggregate_config = AggregateConfig::new(DEFAULT_LOG_PATH);
 
-    run(args.exchange.as_deref(), feed_config, aggregate_config).await
+    run(feed_config, aggregate_config, args.enable_dashboard).await
 }
 
 async fn run(
-    exchange: Option<&str>,
     feed_config: FeedConfig,
     aggregate_config: AggregateConfig,
+    enable_dashboard: bool,
 ) -> Result<()> {
     let (updates_tx, updates_rx) = mpsc::channel(4096);
-    let aggregator = tokio::spawn(run_aggregator(updates_rx, aggregate_config));
+    let (dashboard_tx, _) = broadcast::channel(4096);
+    let aggregator = tokio::spawn(run_aggregator(
+        updates_rx,
+        aggregate_config,
+        dashboard_tx.clone(),
+    ));
 
-    match exchange {
-        Some("bybit") => spawn_feed(Bybit::default(), feed_config, updates_tx),
-        Some("gemini") => spawn_feed(Gemini::default(), feed_config, updates_tx),
-        Some("binance") => spawn_feed(Binance::default(), feed_config, updates_tx),
-        Some("bitstamp") => spawn_feed(Bitstamp::default(), feed_config, updates_tx),
-        Some("coinbase") => spawn_feed(Coinbase::default(), feed_config, updates_tx),
-        Some(exchange) => bail!("unknown exchange '{exchange}'"),
-        None => {
-            spawn_feed(Bybit::default(), feed_config.clone(), updates_tx.clone());
-            spawn_feed(Gemini::default(), feed_config.clone(), updates_tx.clone());
-            spawn_feed(Binance::default(), feed_config.clone(), updates_tx.clone());
-            spawn_feed(Bitstamp::default(), feed_config.clone(), updates_tx.clone());
-            spawn_feed(Coinbase::default(), feed_config, updates_tx);
-        }
+    let dashboard = if enable_dashboard {
+        let dashboard_addr: SocketAddr = DASHBOARD_ADDR.parse()?;
+        Some(tokio::spawn(run_dashboard(dashboard_addr, dashboard_tx)))
+    } else {
+        None
     };
+
+    spawn_feed(Bybit::default(), feed_config.clone(), updates_tx.clone());
+    spawn_feed(Gemini::default(), feed_config.clone(), updates_tx.clone());
+    spawn_feed(Binance::default(), feed_config.clone(), updates_tx.clone());
+    spawn_feed(Bitstamp::default(), feed_config.clone(), updates_tx.clone());
+    spawn_feed(Coinbase::default(), feed_config, updates_tx);
 
     tokio::signal::ctrl_c().await?;
     eprintln!("received ctrl-c, shutting down");
     aggregator.abort();
+    if let Some(dashboard) = dashboard {
+        dashboard.abort();
+    }
     Ok(())
 }
 
@@ -66,42 +78,25 @@ where
 
 #[derive(Debug)]
 struct Args {
-    exchange: Option<String>,
-    log_path: String,
+    enable_dashboard: bool,
 }
 
 impl Args {
     fn parse() -> Result<Self> {
-        let mut exchange = None;
-        let mut log_path = "exp/aggregate.log".to_string();
+        let mut enable_dashboard = false;
         let mut args = std::env::args().skip(1);
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--exchange" | "-e" => {
-                    exchange = args.next();
-                    if exchange.is_none() {
-                        bail!("{arg} requires an exchange name");
-                    }
-                }
-                "--log-path" | "-l" => {
-                    log_path = args
-                        .next()
-                        .ok_or_else(|| anyhow::anyhow!("{arg} requires a log path"))?;
-                }
+                "--dashboard" => enable_dashboard = true,
                 "--help" | "-h" => {
-                    println!(
-                        "Usage: bitcoin [--exchange bybit|gemini|binance|bitstamp|coinbase] [--log-path FILE]"
-                    );
+                    println!("usage: bitcoin [--dashboard]");
                     std::process::exit(0);
-                }
-                exchange_name if exchange.is_none() => {
-                    exchange = Some(exchange_name.to_string());
                 }
                 _ => bail!("unexpected argument '{arg}'"),
             }
         }
 
-        Ok(Self { exchange, log_path })
+        Ok(Self { enable_dashboard })
     }
 }
