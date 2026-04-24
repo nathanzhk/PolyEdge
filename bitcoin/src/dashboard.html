@@ -123,6 +123,13 @@
       overflow-wrap: anywhere;
     }
 
+    .baseline {
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--muted);
+    }
+
     .change {
       font-variant-numeric: tabular-nums;
       font-size: 14px;
@@ -328,6 +335,7 @@
         "<div class=\"price\" id=\"price-", item.key, "\">--</div>",
         "</div>",
         "<div class=\"meta\">",
+        "<div class=\"baseline\" id=\"baseline-", item.key, "\">--</div>",
         "<div class=\"change\" id=\"change-", item.key, "\">--</div>",
         item.key === "combined" ? "<div class=\"delay\"></div>" : "<div class=\"delay\" id=\"delay-" + item.key + "\">--</div>",
         "</div>",
@@ -344,10 +352,13 @@
     function updateSummary(snapshot) {
       for (const item of series) {
         const price = exPrice(snapshot, item.key);
+        const baseline = exBaseline(snapshot, item.key);
         const change = exChange(snapshot, item.key);
         const priceEl = document.getElementById("price-" + item.key);
+        const baselineEl = document.getElementById("baseline-" + item.key);
         const changeEl = document.getElementById("change-" + item.key);
         priceEl.textContent = formatPrice(price);
+        baselineEl.textContent = formatPrice(baseline);
         changeEl.textContent = signed(change);
         changeEl.className = "change " + (isNumber(change) && change >= 0 ? "positive" : "negative");
 
@@ -366,6 +377,10 @@
 
     function exDelay(snapshot, key) {
       return snapshot.exchanges[key]?.delay;
+    }
+
+    function exBaseline(snapshot, key) {
+      return key === "combined" ? snapshot.baseline : snapshot.exchanges[key]?.baseline;
     }
 
     function exChange(snapshot, key) {
