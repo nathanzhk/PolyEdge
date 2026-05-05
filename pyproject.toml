@@ -1,7 +1,7 @@
 [project]
-name = "polyedge"
+name = "eventlab"
 version = "0.1.0"
-description = "PolyEdge"
+description = "EventLab"
 requires-python = ">=3.13"
 dependencies = [
   "py-clob-client>=0.32.0",
